@@ -1,5 +1,10 @@
 <div align="center">
 
+> **3.0.0 正式版 · 2026-10-26**。Java 21 / Spring Boot 4.1.1 / Spring AI 2.0.1 / AgentScope 2.0.4。AgentScope 驱动执行循环，MateClaw 保留工具审批、权限、Goal、SSE 与持久化。正式发行版请查看 Releases。
+> [3.0.0 架构升级日志](CHANGELOG.md)
+> 包含 2.3.0 之后全部累计更新：结构化决策、成员文件隔离、DSH SDK 升级、朗读音色试听和结构化 MCP 展示。
+
+
 <p align="center">
   <img src="mateclaw-ui/public/logo/mateclaw_logo_s.png" alt="MateClaw Logo" width="120">
 </p>
@@ -15,7 +20,7 @@
 [![在线演示](https://img.shields.io/badge/演示-在线-orange.svg?logo=vercel&label=Demo)](https://claw-demo.mate.vip)
 [![官网](https://img.shields.io/badge/官网-claw.mate.vip-blue.svg?logo=googlechrome&label=Site)](https://claw.mate.vip)
 [![Java 版本](https://img.shields.io/badge/Java-21+-blue.svg?logo=openjdk&label=Java)](https://adoptium.net/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
 [![Vue](https://img.shields.io/badge/Vue-3-4FC08D.svg?logo=vuedotjs)](https://vuejs.org/)
 [![最后提交](https://img.shields.io/github/last-commit/mateaix/mateclaw)](https://github.com/mateaix/mateclaw)
 [![许可证](https://img.shields.io/badge/license-Apache--2.0-red.svg?logo=opensourceinitiative&label=License)](LICENSE)
@@ -30,7 +35,7 @@
 
 ---
 
-> **v2.3.0（2026-09-20 发布）——持久目标的 JSON 验收与执行证据。** 用户可配置 JSON 必需字段，将检查结果绑定到当前要求和不可变产物版本；同时加入团队成员受控干预、技能文档及文件夹上传，并修复 DSH 历史与输出预算、vLLM 推理内容和 SSE 分帧。 [查看完整更新日志](https://claw.mate.vip/docs/zh/releases/2.3.0)。
+> **3.0.0——受治理的执行、可恢复的长任务与团队交付。** Java 21、Spring Boot 4、Spring AI 2 和 AgentScope 2 驱动原生运行时；统一上下文预算、最终答复检查和团队汇总完善交付，同时保留审批与工作空间边界。[正式版更新与升级说明](https://claw.mate.vip/docs/zh/releases/3.0.0)。发布日期：**2026-10-26**。
 
 ---
 
@@ -38,13 +43,25 @@
 >
 > 多用户工作空间。敏感操作走审批。完整审计日志。Spring Boot Actuator 健康监控。单个渠道挂掉不影响其他渠道的错误隔离。一个 JAR 包跑在自己的环境里；持久化数据由你掌控，任务所需内容只会发送到你主动配置的模型、渠道或工具服务。
 >
-> **底下是一套真正的 Agent Runtime。** 员工不再焊死在一套推理循环上：可以用原生 StateGraph 运行 ReAct、Plan-and-Execute、Goal 与 Team Run，也可以通过认证 JSON-RPC 把 DeepSeek Harness 作为受管理的外部循环。两条路径最终进入同一套会话、工作空间边界、Tool Guard、事件投影与生命周期控制。
+> **底下是一套真正的 Agent Runtime。** 员工不再焊死在一套推理循环上：可以用原生 AgentScope 运行 ReAct、Plan-and-Execute、Goal 与 Team Run，也可以通过 SDK JSON-RPC 把 DeepSeek Harness 作为受管理的外部循环。两条路径最终进入同一套会话、工作空间边界、Tool Guard、事件投影与生命周期控制。
 
 大多数 AI 工具一到厂商抽风那天就两手一摊。关一次标签页就忘了你是谁。给你一个聊天框，就敢叫产品。
 
 **MateClaw 是完整的一整套。** 一次部署——推理、知识、记忆、工具、多渠道入口，从第一天就一起设计，不是事后拼接。主模型不可用时，系统会按优先级改由下一家健康供应商重新完成当前请求。
 
 ---
+
+## 3.0.0 更新概览
+
+3.0.0 发布于 **2026-10-26**，包含未单独正式发布的 2.4.0 开发周期更新。发行包请从 Releases 下载。
+
+- **原生执行循环**：AgentScope Java **2.0.4** 驱动 ReAct 与 Plan-Execute 每个步骤内部的工具循环。计划调度、工具审批、工作空间权限、取消、Goal 验收和持久化继续由 MateClaw 管理；这条路径不依赖 beta 版 AgentScope Harness API。
+- **统一上下文预算**：请求准备、压缩重试和摘要调用统一计算消息、实际生效的工具 schema 与一份输出预留。请求只覆盖部分选项时继承模型默认值，显式空工具列表关闭默认回调。估算偏保守，不等同于供应商计费 token。
+- **受治理的决策与恢复**：类型化决策默认 SHADOW 模式，继续遵守领域约束和 Goal 预算；持久检查点在副作用结果不确定时阻止盲目重放。
+- **长任务与团队交付**：未完成工作可在运行时限制内继续，需要用户补充信息时等待回复；Team Run 在最终汇总完成后再发布完成状态，成员进度保留完整结果与失败原因。
+- **日常能力完善**：可选严格成员文件隔离、受管理的 DSH SDK 升级、音色选择与试听、MCP 结构化展示及更严格的模型探测。
+
+源码构建使用 Java 21。升级前备份数据库、workspace、插件与配置，回滚使用升级前备份。[架构与升级说明](mateclaw-server/src/main/resources/docs/zh/changelog.md) · [模型预算规则](mateclaw-server/src/main/resources/docs/zh/models.md)
 
 ## 三件让它与众不同的事
 
@@ -86,7 +103,7 @@ MateClaw 的 **LLM Wiki** 把它消化成结构化页面，页面之间自己长
 你雇佣员工，不是开聊天框。每位有**角色**、**目标**、**背景故事**、运行时、像素艺术头像与专属配色——6 个内置模板（通用助手 · 产品助理 · 研究分析师 · 客服助理 · 数据分析师 · 代码审查员）开箱可用。即使更换执行引擎，员工身份和治理边界仍保持不变。
 
 ### Agent Runtime：Native 或 DSH（2.2.0+）
-`AgentRuntimeProvider` contract 把员工与实际执行回合的引擎分开。**Native Runtime** 在 MateClaw 内运行 ReAct、Plan-and-Execute、Persistent Goal 与 Team Run；**DSH Runtime** 把 `dsh-jsonrpc-agent` 作为认证子进程管理，并将思考、文本、工具调用、用量、完成与取消统一映射为 runtime event。DSH 掌管外部 Agent loop，MateClaw 继续掌管 session、workspace、凭证、工具、审批、消息和 UI 投影。启动前会校验 runtime 可用性与能力；控制台可完成 DSH 的安装、配置、校验、连接测试和启停。[配置 DeepSeek Harness →](https://claw.mate.vip/docs/zh/deepseek-harness)
+`AgentRuntimeProvider` contract 将员工与执行引擎分离。**Native Runtime** 在 MateClaw 内运行 ReAct、Plan-and-Execute、Persistent Goal 与 Team Run；**DSH Runtime** 启动官方 `dsh --profile sdk` CLI，统一映射思考、文本、工具、用量、完成与取消事件。受管理安装要求 Node.js 22，使用受审查 npm 锁文件固定 `0.2.0-rc.1`（另选 `0.1.7-rc.2`）。新增可选 `0.2.1-rc.2` 候选，macOS arm64 安装、握手和短模型/工具任务已验证，默认选择保持不变。升级复制 home、检查候选并切换保留的代次；回滚恢复旧 home/配置，不合并升级后的新会话。实际包及真实模型适配器检查已在 macOS arm64 通过；Linux x64 和持久化 V3→V4 历史迁移仍待验证。[配置 DeepSeek Harness →](https://claw.mate.vip/docs/zh/deepseek-harness)
 
 ### 持久长任务：检查点、重启、继续（2.2.0+）
 Persistent Goal 把需要数小时的工作拆成有界、可恢复的执行段。数据库会保存目标清单、continuation 状态、attempt、冷却、lease，以及员工忙碌期间已经接收的用户输入。单后端实例重启后，supervisor 会先核对被中断的 attempt，读取持久检查点和已有产物，再调度下一段安全工作，不要求用户重新描述任务。
@@ -162,15 +179,22 @@ RBAC + JWT。**Personal Access Token** 给无人值守脚本和 CI 使用。**We
 
 ```bash
 # 后端
-cd mateclaw-server
-mvn spring-boot:run           # http://localhost:18088
+# 需要 Java 21 与 Maven。首次生成本地 JWT 密钥，重启时复用。
+[ -f .env.local ] || (umask 077; printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 48)" > .env.local)
+set -a
+source .env.local
+set +a
+# 从仓库根目录运行，使用根目录下已配置的模型数据库与工作空间
+SPRING_DATASOURCE_URL="jdbc:h2:file:$PWD/data/mateclaw;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE" \
+MATECLAW_WORKSPACE_SANDBOX_ROOT="$PWD/data/workspace" \
+mvn -pl mateclaw-server spring-boot:run  # http://localhost:18088
 
-# 前端
+# 前端（新终端，从仓库根目录进入）
 cd mateclaw-ui
-npm install && npm run dev    # http://localhost:5173
+npm install && npm run dev -- --host 127.0.0.1    # http://localhost:5173
 ```
 
-默认登录：`admin` / `admin123`
+新数据库默认登录：`admin` / `admin123`。登录后修改密码，并在 **设置 → 模型** 配置模型。已有模型配置从根目录 `data/` 数据库读取；使用 `mateclaw-server/data/` 会打开另一份数据库。不要提交 `.env.local`，其中 `JWT_SECRET` 必须非空且至少包含 32 个 UTF-8 字节。
 
 ### Docker 部署
 
@@ -204,7 +228,7 @@ docker compose up -d          # http://localhost:18080
 
 ```
 mateclaw/
-├── mateclaw-server/        Spring Boot 3.5 后端（Agent Runtime contract · Native StateGraph + DSH）
+├── mateclaw-server/        Spring Boot 4.1.1 后端（Agent Runtime contract · Native AgentScope + DSH）
 ├── mateclaw-ui/            Vue 3 + TypeScript 管理 SPA（构建产物打进后端 JAR）
 ├── mateclaw-desktop/       Electron 桌面端（本地内嵌 / 远程集中双模式）
 ├── mateclaw-webchat/       网页嵌入式聊天组件（UMD / ES bundle）
@@ -222,8 +246,8 @@ mateclaw/
 
 | 层次 | 技术 |
 |---|---|
-| 后端 | Spring Boot 3.5 · Spring AI Alibaba 1.1 · MyBatis Plus · Flyway |
-| Agent Runtime | `AgentRuntimeProvider` contract · Native StateGraph（ReAct + Plan-Execute）· 受管理的 DSH JSON-RPC runtime · 统一事件 / 生命周期 / 用量 · Tool Guard |
+| 后端 | Spring Boot 4.1.1 · Spring AI 2.0.1 · AgentScope Java 2.0.4 · MyBatis Plus · Flyway |
+| Agent Runtime | `AgentRuntimeProvider` contract · Native AgentScope（ReAct + Plan-Execute）· 受管理的 DSH JSON-RPC runtime · 统一事件 / 生命周期 / 用量 · Tool Guard |
 | 业务编排 | 工作流（7 step mode · Pebble DSL）· 触发器（6 pattern type · 事件治理）· Wiki 加工器（1.3.0+）|
 | 能力扩展 | SKILL.md 包 · MCP（stdio / SSE / HTTP · per-agent 绑定）· ACP 桥接（Claude Code / Codex） |
 | 数据库 | H2（开发）· PostgreSQL 16（Docker 默认）· MySQL 8.0+（支持）· Kingbase（按需驱动）|
@@ -320,8 +344,8 @@ mateclaw/
 ```bash
 git clone https://github.com/mateaix/mateclaw.git
 cd mateclaw
-cd mateclaw-server && mvn clean compile
-cd ../mateclaw-ui && npm install && npm run dev
+mvn -pl mateclaw-server -am clean compile
+cd mateclaw-ui && npm install && npm run dev -- --host 127.0.0.1
 ```
 
 ---

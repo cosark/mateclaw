@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -46,12 +46,12 @@ import static org.mockito.ArgumentMatchers.eq;
         "spring.datasource.url=jdbc:h2:mem:webchat_approve_${random.uuid};MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1",
         "spring.ai.dashscope.api-key=test-key",
         "spring.main.web-application-type=none",
-        "mateclaw.jwt.secret=webchat-it-secret-0123456789",
+        "mateclaw.jwt.secret=webchat-it-secret-0123456789abcdef",
         "mateclaw.webchat.orphan-grace-sec=-1"
 })
 class WebChatApprovalInteractionTest {
 
-    private static final String SECRET = "webchat-it-secret-0123456789";
+    private static final String SECRET = "webchat-it-secret-0123456789abcdef";
     private static final String API_KEY = "testkey1abcdefgh"; // key8 = "testkey1"
     private static final long CHANNEL_ID = 9_147_310L;
     private static final long AGENT_ID = 9_147_3101L;
@@ -60,7 +60,7 @@ class WebChatApprovalInteractionTest {
     @Autowired private ApprovalWorkflowService approvalService;
     @Autowired private ChatStreamTracker streamTracker;
     @Autowired private JdbcTemplate jdbc;
-    @MockBean private AgentService agentService;
+    @MockitoBean private AgentService agentService;
 
     @BeforeEach
     void setUp() {

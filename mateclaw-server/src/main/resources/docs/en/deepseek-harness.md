@@ -1,208 +1,121 @@
 ---
 title: DeepSeek Harness Integration
-description: Install DeepSeek Harness and configure it as a digital employee runtime in MateClaw.
-head:
-  - - meta
-    - name: keywords
-      content: DeepSeek Harness,DSH,digital employee,Agent runtime,JSON-RPC,Cordis
+description: Configure, verify, upgrade, and recover the managed DeepSeek Harness SDK runtime.
 ---
 
 # DeepSeek Harness Integration
 
-This guide connects the official DeepSeek Harness (DSH) to MateClaw and creates a digital employee powered by the DSH runtime.
+DSH is an employee runtime. MateClaw launches the official `dsh --profile sdk` process and translates its JSON-RPC session events into conversation output. Configure the DeepSeek provider in **Settings → Models**, then select **DSH / DeepSeek Harness** when creating a digital employee with a workspace.
 
-In MateClaw, DSH is an **employee runtime**, not an MCP tool and not a regular plugin. MCP supplies tools; DSH owns the external Agent process, the ReAct loop, and the event stream that MateClaw projects into the conversation UI.
+## Requirements and installation
 
-## Architecture
+The managed installer requires **Node.js 22**, npm, and registry access. It supports macOS arm64 and Linux x64 candidates. Actual package installation and Java adapter/model checks have passed on macOS arm64 with Node 22.20.0 and npm 11.6.2. Linux x64 remains pending actual verification; Windows/WSL has not been verified.
 
-```text
-MateClaw Chat / SSE
-        |
-        v
-DSH Runtime Provider
-        |
-        v  JSON-RPC over stdin/stdout
-dsh-jsonrpc-agent
-        |
-        v
-DeepSeek API + Cordis composition
-```
+Use the DSH management console to install the pinned **`0.2.0-rc.1`** target. The reviewed alternative is **`0.1.7-rc.2`**. Installation uses checked-in dependency locks and `npm ci` in a separate candidate directory; it does not resolve a moving `latest` tag or modify global npm packages. Both are prereleases.
 
-MateClaw remains responsible for employees, sessions, permissions, workspaces, message persistence, and UI projection. DSH runs the turn. MateClaw injects the API key from the DeepSeek provider configuration into the DSH child process. Never put secrets in `runtimeConfig`, employee prompts, or the repository.
+Run **Verify**, **Test connection**, and **Test task**. These mean different things: configuration checks, an SDK `initialize` handshake, and a real model task requiring the answer `OK`. A successful handshake alone does not establish model access. The wire server version `0.0.1` is not the npm package version; managed provenance records the pinned package separately. An external executable remains unverified unless independently checked.
 
-## Prerequisites
+The Docker runtime image pins Node.js 22 and includes bubblewrap for Linux sandbox execution. Rebuild or pull the updated image before installing managed DSH packages; updating the application JAR alone does not update container dependencies. Host installations must supply their own runtime dependencies.
 
-- macOS, Linux, or Windows (commands below use macOS / Linux syntax)
-- JDK 21
-- A running MateClaw backend and frontend
-- A DeepSeek API key
-- A built DSH JSON-RPC agent
-- The Cordis configuration from the DSH checkout
+## SDK configuration
 
-Check the runtime files:
+Use an absolute executable path to `node_modules/.bin/dsh`, profile `sdk`, an existing working directory, and a dedicated home root. Optional patch paths are an ordered JSON array of absolute files. MateClaw assigns a separate `DSH_HOME` for each workspace/employee pair and launches arguments directly, without a shell.
 
-```bash
-"$DSH_JSONRPC_AGENT" --help
-test -x "$DSH_JSONRPC_AGENT"
-test -f "$DSH_CORDIS_CONFIG"
-```
+| Managed key | Purpose |
+| --- | --- |
+| `dsh.executable_path` | Absolute SDK CLI executable |
+| `dsh.profile` | Must be `sdk` |
+| `dsh.working_directory` | Default workspace directory |
+| `dsh.home_root` | Root for isolated runtime homes |
+| `dsh.patch_paths` | Ordered JSON array of patch files, for example `[]` |
 
-## Install DSH
+Legacy `dsh-jsonrpc-agent`/Cordis entrypoint configuration requires migration. Clear `dsh.cordis_config_path` and the old `DSH_CORDIS_CONFIG` environment setting; replace the executable with the SDK CLI. Do not put a shell command or extra arguments in the executable field. `DSH_JSONRPC_AGENT` remains a compatibility environment name for an executable path, not an instruction to use the old binary.
 
-Follow the [official DeepSeek Harness repository](https://github.com/deepseek-ai/deepseek-harness) for the current build instructions. The build must provide these two paths:
+Keep credentials in the provider configuration or dedicated protected runtime settings. MateClaw passes them to the child environment. For the official DeepSeek host, the adapter maps its ordinary API root to the Messages API `/anthropic` route required by these packages. Arbitrary custom endpoints still need a compatible Messages API.
 
-```text
-<dsh-root>/dist-exe/dsh-jsonrpc-agent-pkg-<platform>
-<dsh-root>/python/sdk-runtime/src/deepseek_harness_runtime/runtime/cordis.yml
-```
+MateClaw sends an explicit model output cap through `initialize.maxTokens`: the configured positive cap, defaulting to 4096, limited to half the known context window. This does not replace DSH's context management.
 
-Keep the DSH binary outside the MateClaw source tree. Configure its location with environment variables.
+## Upgrade and rollback
 
-## Configure the IDEA backend
+Managed upgrades prepare a separate package generation, block new DSH turns, and wait up to 60 seconds for current turns to drain. They copy runtime homes and configured patch files, check the candidate handshake and a new model task in each affected home, then atomically select the executable/configuration/home generation together. Original homes and the previous generation remain available. Failure before activation keeps the previous selection. Native turns are not part of the DSH admission gate.
 
-Open **Run | Edit Configurations...** in IDEA, select the MateClaw Spring Boot configuration, and add these variables under **Environment variables**:
+The home copier rejects symlinks and special files instead of following them. Customized homes containing such files require explicit migration. Generation records and package locations are retained; active home contents remain mutable during normal use.
 
-```text
-DSH_JSONRPC_AGENT=/absolute/path/to/dsh-jsonrpc-agent-pkg-macos-arm64
-DSH_CORDIS_CONFIG=/absolute/path/to/cordis.yml
-DSH_CWD=/absolute/path/to/mateclaw-workspace
-```
+Rollback is available for a completed operation while its candidate generation is still active. It copies and checks the retained previous home/configuration before switching. It does **not** merge sessions created after the upgrade or reverse database changes. Keep retained generations and backups until acceptance is complete.
 
-Example:
+Candidate checks start new sessions. They do not prove that every historic DSH session can be reopened or migrated. Actual persisted **V3 → V4 history migration has not been verified**.
 
-```text
-DSH_JSONRPC_AGENT=/opt/deepseek-harness/dist-exe/dsh-jsonrpc-agent-pkg-macos-arm64
-DSH_CORDIS_CONFIG=/opt/deepseek-harness/python/sdk-runtime/src/deepseek_harness_runtime/runtime/cordis.yml
-DSH_CWD=/var/lib/mateclaw/workspace
-```
+DSH uses its profile-managed tools and does not provide MateClaw host approval integration. Member file isolation blocks this runtime. Rollback does not undo tool writes to workspace files or delete MateClaw chat records.
 
-`DSH_CWD` must be readable and writable by the backend process. Use absolute paths in the IDEA run configuration. Restart the backend after changing them; Spring Boot does not hot-reload process environment variables.
+## Conversations and diagnostics
 
-## Configure the DeepSeek provider
+Each MateClaw turn uses a fresh SDK session ID. MateClaw replays bounded completed user/assistant text history; this is not restoration of DSH tool state. Do not reuse an existing persisted SDK ID as a fresh session. Completion is based on the SDK terminal event, not merely on an enqueue receipt or idle status.
 
-1. Sign in to MateClaw.
-2. Open **Settings → Models**.
-3. Configure and enable the **DeepSeek** provider.
-4. Enter the DeepSeek API key and base URL.
-5. Confirm that at least one enabled DeepSeek chat model exists.
+The admin API is under `/api/v1/admin/dsh`: `GET /status`, `POST /verify`, `/test-connection`, `/test-task`, `/upgrades`, and `GET /upgrades/{id}`. Upgrade requests carry an exact `targetVersion`, the current `expectedRevision`, and an `idempotencyKey`; rollback is `POST /upgrades/{id}/rollback` with revision and idempotency key. Poll the operation record for results. Logs and status must not expose credentials.
 
-MateClaw resolves the model through its model configuration, using the global default when none is specified. If configuration resolution is unavailable, an explicitly requested model name is retained; `deepseek-v4-flash` is the fallback only when that name is also empty. Dedicated DSH credentials and endpoint settings take precedence; otherwise, MateClaw reads the selected model's provider configuration, falling back to the `deepseek` provider as needed. A custom model must be usable by the DeepSeek provider route in DSH.
+## Recovering an orphaned runtime
 
-MateClaw explicitly sends the model's maximum output tokens through SDK `initialize.maxTokens`, avoiding DSH's 256000 default. An unset or invalid output cap defaults to 4096. The cap is also limited to half the known context window to reserve space for input. The model's configured window takes precedence over the global conversation window. For a 128000-token window, an 8192 output cap stays 8192; an oversized 256000 cap becomes 64000.
+`dsh.orphaned_runtime_requires_recovery` means a lease belongs to a JVM that is no longer alive. Admission deliberately remains blocked: its DSH process or tool descendants may still be writing the runtime home.
 
-This is a static output bound, not a live token count of the complete DSH request. SDK initialization has no direct context-window field; DSH's internal context capacity and compaction remain controlled by its runtime/Cordis configuration. Long tool histories can still exceed the window. Upgrade older DSH versions that do not support `initialize.maxTokens`.
+1. Stop DSH traffic and identify the lease under the managed install root's `leases/` directory (default root: `~/.mateclaw/runtimes/deepseek-harness`).
+2. Verify the recorded JVM owner is gone, identify and stop its orphaned DSH processes **and tool descendants**, and confirm no process is writing the affected home.
+3. Back up the affected state, then remove only the confirmed stale lease. Do not remove live leases or blindly delete the leases directory.
+4. Inspect the durable upgrade operation and active generation, then retry verification before admitting work.
 
-## Create a DSH digital employee
+A backend restart alone is not orphan-process cleanup. Do not delete a stale lease merely to bypass the error.
 
-Open **Digital Employees → New**:
+## 0.2.1-rc.2 evolutionary candidate (2026-10-20)
 
-1. Enter the employee name, role, and goal.
-2. Select **DSH / DeepSeek Harness** as the runtime.
-3. Set a workspace; when blank, `DSH_CWD` is used.
-4. Use a JSON object for `runtimeConfig`, for example:
+The catalog now offers exact `0.2.1-rc.2` as an opt-in candidate alongside retained `0.2.0-rc.1` and `0.1.7-rc.2`. The default install target stays `0.2.0-rc.1`; adding the candidate does not change the active generation. All three versions are prereleases. The management page reads the server catalog and retains an installed catalog version rather than silently selecting a newer release.
 
-```json
-{
-  "mode": "qa",
-  "workspace": "default",
-  "policy": "read-only"
-}
-```
+Candidate checks on macOS arm64 / Node 22.20.0 / npm 11.6.2 cover clean `npm ci`, actual SDK initialize/shutdown, a DeepSeek V4 Flash reply (`SDK_OK`) and a real Bash tool task (`printf DSH_TOOL_OK`). Sanitized reply/tool recordings run through the Java turn adapter regression suite. Subsequent macOS checks also passed actual cancel/crash recovery, interrupted file-checkpoint verification and 20 fresh-process rounds in 501 seconds. They do not establish multi-hour endurance, persisted-history migration, Linux/WSL compatibility or production rollback for this candidate. Run the existing managed upgrade checks before activation; retain previous generations.
 
-5. Save the employee and open its chat.
+The adapter recognizes the candidate's job registration/settlement and working-directory metadata events without treating them as completion. `DSH_AGENTS_HOME` is explicitly scoped to `<employee-generation-home>/agents`, preventing implicit reads from the host user's `~/.agents`; a symlink at that instruction root is rejected. Administrator patch files can override SDK configuration and remain trusted inputs. This is not an OS sandbox, and DSH still has no MateClaw host tool-approval bridge.
 
-Runtime configuration describes employee policy only. Do not put `DEEPSEEK_API_KEY`, cookies, bearer tokens, or sensitive local paths in it.
+Upstream model/search, minimal-profile image/compaction, interactive questions and working-directory APIs are separate integration work. Updating the package does not automatically expose them in MateClaw, merge DSH context management into native prompt budgets, or restore historic tool state. The existing text-history replay and output cap remain.
 
-## Verification checklist
+## Cancellation and workspace checkpoints (2026-10-20)
 
-Send this message in the DSH employee conversation:
+Real SDK/model checks exercised a running Bash sleep: explicit cancellation produced one CANCELLED event, and forcibly killing the SDK root failed the stream. In both tested cases the recorded SDK/tool PIDs exited and a new application connection completed. A separate interrupted-write case verified an already committed checkpoint without rewriting it. Twenty fresh-process rounds each read, append, wait and verify a ledger; all 20 exact ledger snapshots passed over 501 seconds. This is a bounded multi-minute exercise, not a multi-hour guarantee.
 
-```text
-Reply with exactly: DSH_RUNTIME_OK
-```
+The transport now retains observed descendant ProcessHandles while the root is alive so those handles remain available after a crash. Cleanup is best effort: children born and reparented entirely between observations, or detached beforehand, can escape capture. An isolated runtime home does not provide OS containment, and stronger process supervision remains an open gate. Candidate status and strict-member-isolation restrictions remain.
 
-Success means:
+Workspace-checkpoint recovery requires inspecting the existing artifact before deciding whether to repeat a write. It does not restore SDK tool state, automatically replay uncertain side effects, or prove exactly-once behavior for external systems. Goal acceptance, call budgets, approvals and application permissions are unchanged; regression covers them separately from these direct runtime probes.
 
-- The employee header shows `DSH Harness`.
-- Thinking state and text deltas appear in the chat.
-- The log contains `provider=deepseek` and `apiKeyConfigured=true`.
-- The log contains a `turn/end` event with `kind=completed`.
-- The UI does not show “no output for this run”.
-- The same conversation is not used to start two different DSH live sessions.
+## Optional Docker process supervision (experimental)
 
-You can continue chatting in the same MateClaw conversation. Each turn uses a fresh DSH process and runtime session ID to avoid persisted-log `id collision`. MateClaw supplies up to 40 recent completed user/assistant text messages from that conversation, within a 4096 estimated-token history budget. The current message is sent once and is not truncated by this history budget. Older history may be omitted and a boundary message may be marked `[truncated]`. Saved text history remains available after a backend restart; internal DSH tool state is not restored. Scheduled tasks do not replay conversation history.
+`native` remains the default. Native descendant observation cannot guarantee cleanup of a process that forks, creates a new session and reparents between observations. Optional `docker` mode creates a separate Linux PID namespace **before** SDK startup. Cancellation, SDK shutdown and loss of the attached Docker client remove only the recorded container ID. Completed/CANCELLED events require confirmed cleanup; a removal failure is an error and retains the conversation's generation lease until an explicit cancellation retry confirms removal. It never falls back to native execution.
 
-To verify multi-turn context, send “My name is Alex”, then “What is my name?” in the same conversation. A new conversation must not inherit that information through this history mechanism.
-
-## Logs and diagnostics
-
-The backend log is commonly located at:
-
-```text
-logs/mateclaw.log
-```
-
-Search for the runtime signals:
+Build a dedicated image from the bundled trusted lock (from the repository root):
 
 ```bash
-rg "\[DSH\]|MISSING_CREDENTIAL|EMPTY_RESPONSE|id collision" logs/mateclaw.log
+docker build -f mateclaw-server/src/main/resources/dsh/container/Dockerfile \
+  --build-arg DSH_VERSION=0.2.1-rc.2 \
+  --build-arg DSH_LOCK_SHA256=4c17ebb6b36dfdebe24100490a375bb93e72fc7450595751c8737b357ce8987d \
+  -t mateclaw-dsh-local:0.2.1-rc.2 mateclaw-server/src/main/resources/dsh
+docker image inspect --format '{{.Id}}' mateclaw-dsh-local:0.2.1-rc.2
 ```
 
-The admin-only diagnostics endpoint is:
-
-```http
-GET /api/v1/admin/agent-runtime/dsh/diagnostics
-```
-
-It returns command, executable, Cordis, and capability status without returning the API key.
-
-## Troubleshooting
-
-### `MISSING_CREDENTIAL`
-
-Check that:
-
-1. The DeepSeek provider is enabled under Settings → Models.
-2. The API key was saved successfully.
-3. The employee uses DSH rather than configuring the DSH binary as an MCP command.
-4. The backend was restarted with the updated IDEA configuration.
-
-`apiKeyConfigured=false` in the log means the credential did not reach the DSH child process.
-
-### `EMPTY_RESPONSE`
-
-Check model availability and the base URL. Verify with a short fixed prompt before adding tools or skills.
-
-### `dsh.command_unavailable`
-
-`DSH_JSONRPC_AGENT` must point to an executable file:
+The Dockerfile pins Node 22.20.0 by digest. Review the base, lock, native platform packages and resulting image before use. Configure the returned full `sha256:…` **image ID**, not a tag, then restart the backend:
 
 ```bash
-chmod +x /absolute/path/to/dsh-jsonrpc-agent-pkg-macos-arm64
+export MATECLAW_DSH_CONTAINMENT_MODE=docker
+export MATECLAW_DSH_DOCKER_EXECUTABLE=docker
+export MATECLAW_DSH_DOCKER_IMAGES_JSON='{"0.2.1-rc.2":"sha256:<64 hexadecimal characters from image inspect>"}'
 ```
 
-### `dsh.cordis_missing`
+Provide a separate reviewed image for each SDK catalog version that must run, including candidate checks and rollback. The selected host managed executable identifies the trusted SDK version; the container runs its own matching SDK. Image version/lock labels must match. Runtime never pulls an image or upgrades the active generation. `/status` exposes the configured containment mode; it is not a compatibility certificate.
 
-`DSH_CORDIS_CONFIG` must point to the actual `cordis.yml`, not only the package directory. If a package directory is provided, MateClaw also checks its `runtime/cordis.yml` child path.
+Requirements: a trusted local Docker daemon reachable through a Unix socket, a matching Linux image architecture, and a host UID/GID supported by Java's Unix identity provider. Remote Docker endpoints and Windows hosts are rejected. The selected daemon endpoint stays fixed through cleanup. The container drops all capabilities, uses `no-new-privileges`, a read-only image filesystem and a bounded PID count. Its independent `/tmp` is executable because the SDK native loader copies dynamic libraries there. Only the explicit workspace, scoped employee home and read-only administrator patch files are mounted. Docker access is privileged host access; credentials passed as environment values are visible to Docker administrators. There is no Docker socket, host PID namespace or privileged mode inside the container.
 
-### The answer appears twice
+**Platform limitation:** on the tested macOS arm64 Docker Desktop setup, SDK model calls work, but its native Landlock runner denies reads from the host shared workspace (`EACCES`). Do not use this mode for workspace tasks on that setup. No sandbox disablement or automatic escalation is applied. Linux native bind mounts and other Desktop file-sharing backends require their own read/write/tool acceptance checks; they are not certified by a successful handshake. Process cleanup probes use container `/tmp`, separately from host-workspace compatibility.
 
-Use the latest backend version. DSH emits text deltas followed by a final assistant snapshot. MateClaw must project the deltas only and must not append the snapshot again.
+JVM termination and daemon unavailability remain explicit recovery boundaries. Containers carry `vip.mateclaw.dsh.owner=<random UUID>` and `vip.mateclaw.dsh.jvm=<creator PID>` labels. After confirming the recorded JVM has died, inspect and remove only its identified containers on the original daemon; then perform the stale-lease recovery above. A daemon outage cannot confirm cleanup. Do not remove leases or replay uncertain tool effects merely to admit work. Existing member-isolation rejection, application permissions, Goal rules, bounded text replay and output budgets remain unchanged. Docker process supervision does not add a host approval bridge or certify a complete security sandbox.
 
-## MCP, plugins, and DSH
+### Native shared-workspace investigation (2026-10-21)
 
-| Mechanism | Best for | Replaces DSH? |
-|-----------|----------|--------------|
-| MCP | File, GitHub, database, and other tools | No |
-| Plugin | Extending MateClaw tools, models, channels, or memory | No |
-| DSH employee runtime | Hosting the DeepSeek Harness Agent loop and process | It is the employee runtime, not a tool |
+The reproduced Desktop bind mount is `fakeowner` (filesystem magic `0x6a656a63`), rather than a native Linux filesystem. The exact SDK Landlock launcher rejects reads even with explicit directory/file grants; unrestricted reads succeed. A disposable Docker ext4 volume passes the same sandbox read/write probe and rejects both direct outside writes and symlink escapes. This identifies the filesystem boundary; it does not certify a Desktop configuration fix.
 
-The recommended composition is: **DSH as the employee runtime, MCP as the tool layer, and MateClaw as the governance and visualization layer**.
+The selected next step is Docker Desktop's [Synchronized file shares](https://docs.docker.com/desktop/features/synchronized-file-sharing/), which uses a native ext4 cache and bidirectional synchronization. It requires signing in with Pro, Team or Business entitlement. In Settings → Resources → File sharing, create a share for a disposable test directory first and wait for its Watching status. Do not set bind consistency to `consistent`, which bypasses synchronized shares. Validate actual sandbox behavior and host-visible contents before using a production workspace; do not infer Landlock compatibility from filesystem type or handshake alone. Current local validation is waiting for Docker Desktop login/entitlement; synchronized sharing has not yet been certified.
 
-## Security recommendations
-
-- Store API keys only in MateClaw provider configuration or a controlled environment.
-- Give DSH a dedicated workspace instead of the whole user home directory.
-- Start with a read-only policy and the smallest possible tool set.
-- Never commit `.sessions/`, logs, or local credential configuration.
-- In production, restrict the DSH child process filesystem, network, and credential access.
+The opt-in `DshDockerSharedWorkspaceAcceptanceTest` uses `MATECLAW_DSH_ACCEPTANCE_DOCKER_IMAGE` plus `MATECLAW_DSH_ACCEPTANCE_SHARED_WORKSPACE` (an existing test-share directory). It creates its own temporary subdirectory, checks host→sandbox→host data across two writes, and requires `EACCES` for outside and symlink writes. The independent ext4 volume control runs with only the image variable. Disposable owned containers, volumes and directories are cleaned. No workspace copyback implementation, sandbox bypass, automatic escalation or runtime dependency upgrade has been introduced.

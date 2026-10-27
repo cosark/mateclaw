@@ -1,5 +1,10 @@
 <div align="center">
 
+> **3.0.0 stable release · 2026-10-26**. Java 21 / Spring Boot 4.1.1 / Spring AI 2.0.1 / AgentScope 2.0.4. AgentScope drives execution loops; MateClaw retains tool approvals, permissions, Goals, SSE and persistence. See Releases for stable builds.
+> [3.0.0 architecture changelog](CHANGELOG.md)
+> Includes all changes since 2.3.0: structured decisions, member file isolation, DSH SDK upgrades, voice preview and structured MCP presentation.
+
+
 <p align="center">
   <img src="mateclaw-ui/public/logo/mateclaw_logo_s.png" alt="MateClaw Logo" width="120">
 </p>
@@ -15,7 +20,7 @@
 [![Live Demo](https://img.shields.io/badge/Demo-Online-orange.svg?logo=vercel&label=Demo)](https://claw-demo.mate.vip)
 [![Website](https://img.shields.io/badge/Website-claw.mate.vip-blue.svg?logo=googlechrome&label=Site)](https://claw.mate.vip)
 [![Java Version](https://img.shields.io/badge/Java-21+-blue.svg?logo=openjdk&label=Java)](https://adoptium.net/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
 [![Vue](https://img.shields.io/badge/Vue-3-4FC08D.svg?logo=vuedotjs)](https://vuejs.org/)
 [![Last Commit](https://img.shields.io/github/last-commit/mateaix/mateclaw)](https://github.com/mateaix/mateclaw)
 [![License](https://img.shields.io/badge/license-Apache--2.0-red.svg?logo=opensourceinitiative&label=License)](LICENSE)
@@ -30,7 +35,7 @@
 
 ---
 
-> **v2.3.0 (released 2026-09-20) — JSON acceptance and execution evidence for persistent Goals.** Users can configure required JSON fields and bind checks to current requirements and immutable artifact versions. This release also adds controlled worker intervention and skill document/folder uploads, with fixes for DSH history and output budgets, vLLM reasoning, and SSE framing. [Read the release notes](https://claw.mate.vip/docs/en/releases/2.3.0).
+> **3.0.0 — Governed execution, recoverable long tasks and team delivery.** Java 21, Spring Boot 4, Spring AI 2 and AgentScope 2 power the native runtime. Consistent context budgets, final-answer checks and team synthesis strengthen delivery while preserving approvals and workspace boundaries. [Release and upgrade notes](https://claw.mate.vip/docs/en/releases/3.0.0). Release date: **2026-10-26**.
 
 ---
 
@@ -38,13 +43,25 @@
 >
 > Multi-user workspaces. Approval-gated sensitive actions. Full audit trail. Spring Boot Actuator health monitoring. Per-channel error isolation so one chat platform's outage doesn't take down the rest. One JAR in your environment; you control persisted data, and task content is sent only to model, channel, or tool services you explicitly configure.
 >
-> **And underneath, a real Agent Runtime.** An employee is no longer welded to one reasoning loop. Choose the native StateGraph runtime for ReAct, Plan-and-Execute, Goals, and Team Runs, or run DeepSeek Harness as a managed external loop over authenticated JSON-RPC. Both paths converge on the same conversations, workspace boundaries, Tool Guard, event projection, and lifecycle controls.
+> **And underneath, a real Agent Runtime.** An employee is no longer welded to one reasoning loop. Choose the native AgentScope runtime for ReAct, Plan-and-Execute, Goals, and Team Runs, or run DeepSeek Harness as a managed external loop over SDK JSON-RPC. Both paths converge on the same conversations, workspace boundaries, Tool Guard, event projection, and lifecycle controls.
 
 Most AI tools die when their vendor has a bad day. Most forget you the moment the tab closes. Most give you a chatbox and call it a product.
 
 **MateClaw is the whole widget.** One deployment. Reasoning, knowledge, memory, tools, channels — built together, not bolted on. And when your primary model is unavailable, the next healthy provider retries the current request.
 
 ---
+
+## What changes in 3.0.0
+
+3.0.0 includes the unpublished 2.4.0 development cycle. Release date: **2026-10-26**. Download published packages from Releases.
+
+- **Native execution:** AgentScope Java **2.0.4** runs ReAct and the tool loop within each Plan-Execute step. MateClaw retains plan scheduling, tool approvals, workspace permissions, cancellation, Goal acceptance and persistence. This path does not require a beta AgentScope Harness API.
+- **Consistent context budgets:** request preparation, compaction retries and summary calls account for messages, effective tool schemas and one output reserve. Partial request options inherit model defaults; an explicitly empty tool list disables inherited callbacks. Estimates are conservative, rather than provider billing counts.
+- **Governed decisions and recovery:** typed decisions default to SHADOW mode; existing domain constraints and Goal budgets still apply. Durable checkpoints block blind replay when side effects are uncertain.
+- **Long tasks and team delivery:** unfinished work can continue within runtime limits, requests needing user input wait for a reply, and Team Runs publish completion after final synthesis. Worker progress preserves full results and failure causes.
+- **Everyday improvements:** opt-in strict member file isolation, managed DSH SDK upgrades, voice selection/preview, structured MCP results and stricter model probes.
+
+Use Java 21 for source builds. Back up the database, workspace, plugins and configuration before migration; use that backup for rollback. [Architecture and upgrade notes](mateclaw-server/src/main/resources/docs/en/changelog.md) · [Model budget rules](mateclaw-server/src/main/resources/docs/en/models.md)
 
 ## Three things that make it different
 
@@ -86,7 +103,7 @@ Same brain. Same memory. Same tools. Different doors.
 You hire coworkers, not chat boxes. Each one has a **Role**, a **Goal**, a **Backstory**, a runtime, a pixel-art avatar, and a color of their own — six built-in templates ship ready (General Assistant · Product Assistant · Research Analyst · Customer Support · Data Analyst · Code Reviewer). Employee identity and governance stay stable even when the execution engine changes.
 
 ### Agent Runtime: native or DSH (2.2.0+)
-The `AgentRuntimeProvider` contract separates an employee from the engine that runs its turn. The **native runtime** keeps ReAct, Plan-and-Execute, persistent Goals, and Team Runs inside MateClaw. The **DSH runtime** manages `dsh-jsonrpc-agent` as an authenticated child process and streams thinking, text, tool calls, usage, completion, and cancellation back as normalized runtime events. DSH owns the external Agent loop; MateClaw still owns the session, workspace, credentials, tools, approvals, messages, and UI projection. Runtime availability and capabilities are validated before startup, and DSH can be installed, verified, connection-tested, enabled, or disabled from the console. [Configure DeepSeek Harness →](https://claw.mate.vip/docs/en/deepseek-harness)
+The `AgentRuntimeProvider` contract separates an employee from the engine that runs its turn. The **native runtime** keeps ReAct, Plan-and-Execute, persistent Goals, and Team Runs inside MateClaw. The **DSH runtime** launches the official `dsh --profile sdk` CLI and normalizes its thinking, text, tools, usage, completion, and cancellation events. Managed installation pins `0.2.0-rc.1` (alternative: `0.1.7-rc.2`) with reviewed npm locks and Node.js 22. An opt-in `0.2.1-rc.2` candidate adds SDK compatibility updates; macOS arm64 installation, handshake and short real-model/tool checks passed, while default selection stays unchanged. Upgrades copy runtime homes, check the candidate, and switch a retained generation; rollback restores the previous home/configuration without merging newer sessions. Package and real-model adapter checks passed on macOS arm64; Linux x64 and persisted V3→V4 history migration remain unverified. [Configure DeepSeek Harness →](https://claw.mate.vip/docs/en/deepseek-harness)
 
 ### Durable long tasks: checkpoint, restart, continue (2.2.0+)
 Persistent Goals turn work that takes hours into bounded, recoverable segments. The database preserves the goal checklist, continuation state, attempts, cooldowns, leases, and user input accepted while the worker is busy. After a single backend instance restarts, the supervisor reconciles the interrupted attempt, reads persisted checkpoints and artifacts, and schedules the next safe segment instead of asking you to repeat the task.
@@ -162,15 +179,22 @@ Same "whole widget" philosophy. Different center of gravity.
 
 ```bash
 # Backend
-cd mateclaw-server
-mvn spring-boot:run           # http://localhost:18088
+# Java 21 and Maven required. Create a local JWT secret once and reuse it on restart.
+[ -f .env.local ] || (umask 077; printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 48)" > .env.local)
+set -a
+source .env.local
+set +a
+# From the repository root; use its configured models and workspace
+SPRING_DATASOURCE_URL="jdbc:h2:file:$PWD/data/mateclaw;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE" \
+MATECLAW_WORKSPACE_SANDBOX_ROOT="$PWD/data/workspace" \
+mvn -pl mateclaw-server spring-boot:run  # http://localhost:18088
 
-# Frontend
+# Frontend (new terminal, from the repository root)
 cd mateclaw-ui
-npm install && npm run dev    # http://localhost:5173
+npm install && npm run dev -- --host 127.0.0.1    # http://localhost:5173
 ```
 
-Login: `admin` / `admin123`
+On a fresh database, log in with `admin` / `admin123`, change the password, then configure a model in **Settings → Models**. Existing model settings are read from the root `data/` database; starting against `mateclaw-server/data/` opens a different database. Keep `.env.local` private and set a non-empty `JWT_SECRET` of at least 32 UTF-8 bytes.
 
 ### Docker
 
@@ -204,7 +228,7 @@ Download from [GitHub Releases](https://github.com/mateaix/mateclaw/releases). B
 
 ```
 mateclaw/
-├── mateclaw-server/        Spring Boot 3.5 backend (Agent Runtime contract, native StateGraph + DSH)
+├── mateclaw-server/        Spring Boot 4.1.1 backend (Agent Runtime contract, native AgentScope + DSH)
 ├── mateclaw-ui/            Vue 3 + TypeScript admin SPA (built into the server JAR)
 ├── mateclaw-desktop/       Electron desktop app (local-embedded / remote-centralized)
 ├── mateclaw-webchat/       Embeddable chat widget (UMD / ES bundles)
@@ -222,8 +246,8 @@ Desktop binaries ship via [GitHub Releases](https://github.com/mateaix/mateclaw/
 
 | Layer | Technology |
 |---|---|
-| Backend | Spring Boot 3.5 · Spring AI Alibaba 1.1 · MyBatis Plus · Flyway |
-| Agent Runtime | `AgentRuntimeProvider` contract · Native StateGraph (ReAct + Plan-Execute) · managed DSH JSON-RPC runtime · normalized events / lifecycle / usage · Tool Guard |
+| Backend | Spring Boot 4.1.1 · Spring AI 2.0.1 · AgentScope Java 2.0.4 · MyBatis Plus · Flyway |
+| Agent Runtime | `AgentRuntimeProvider` contract · Native AgentScope (ReAct + Plan-Execute) · managed DSH JSON-RPC runtime · normalized events / lifecycle / usage · Tool Guard |
 | Orchestration | Workflow (7 step modes · Pebble DSL) · Triggers (6 pattern types · event governance) · Wiki Transformations (1.3.0+) |
 | Capability Extension | SKILL.md packages · MCP (stdio / SSE / HTTP · per-agent binding) · ACP bridge (Claude Code / Codex) |
 | Database | H2 (dev) · PostgreSQL 16 (Docker default) · MySQL 8.0+ (supported) · Kingbase (opt-in driver) |
@@ -320,8 +344,8 @@ Full story in the [v1.7.0 release notes](https://claw.mate.vip/docs/en/releases/
 ```bash
 git clone https://github.com/mateaix/mateclaw.git
 cd mateclaw
-cd mateclaw-server && mvn clean compile
-cd ../mateclaw-ui && npm install && npm run dev
+mvn -pl mateclaw-server -am clean compile
+cd mateclaw-ui && npm install && npm run dev -- --host 127.0.0.1
 ```
 
 ---

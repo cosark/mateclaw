@@ -6,7 +6,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
@@ -49,7 +49,7 @@ import static org.mockito.ArgumentMatchers.isNull;
  * body is the actual SSE wire format produced by Spring MVC's SseEmitter — the
  * parser here is the one any third-party SDK would have to write.
  *
- * <p>{@link AgentService} is replaced with a Mockito {@code @MockBean} so the
+ * <p>{@link AgentService} is replaced with a Mockito {@code @MockitoBean} so the
  * agent / model layer is short-circuited: tests stub
  * {@link AgentService#chatStructuredStream} to return canned {@link AgentService.StreamDelta}s
  * and assert on the resulting SSE event sequence. This keeps the test fast,
@@ -79,14 +79,14 @@ import static org.mockito.ArgumentMatchers.isNull;
 @TestPropertySource(properties = {
         "spring.datasource.url=jdbc:h2:mem:webchat_stream_e2e_${random.uuid};MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1",
         "spring.ai.dashscope.api-key=test-key",
-        "mateclaw.jwt.secret=webchat-it-secret-0123456789",
+        "mateclaw.jwt.secret=webchat-it-secret-0123456789abcdef",
         "mateclaw.webchat.orphan-grace-sec=-1",
         "mateclaw.feature-flag.refresh-ms=999999"
 })
 class WebChatStreamE2ETest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    private static final String SECRET = "webchat-it-secret-0123456789";
+    private static final String SECRET = "webchat-it-secret-0123456789abcdef";
     private static final String API_KEY = "testkey1e2etest01"; // key8 = "testkey1"
     private static final long CHANNEL_ID = 9_148_001L;
     private static final long AGENT_ID = 9_148_0011L;
@@ -98,7 +98,7 @@ class WebChatStreamE2ETest {
     @Autowired private ChatStreamTracker streamTracker;
 
     /** Replaced with a Mockito mock; tests stub the two methods /stream calls. */
-    @MockBean private AgentService agentService;
+    @MockitoBean private AgentService agentService;
 
     private HttpClient http;
 

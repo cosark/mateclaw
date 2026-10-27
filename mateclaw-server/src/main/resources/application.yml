@@ -4,6 +4,9 @@ server:
     context-path: /
 
 spring:
+  http:
+    converters:
+      preferred-json-mapper: jackson2
   application:
     name: mateclaw-server
   messages:
@@ -67,16 +70,7 @@ spring:
       enabled: ${H2_CONSOLE_ENABLED:false}
       path: /h2-console
 
-  # Spring AI Alibaba (DashScope) — Spring AI Alibaba 1.1.x configuration path.
-  #
-  # The api-key here is only consumed by Spring AI Alibaba's auto-configured beans
-  # as a *fallback*. The real source of truth for every provider/key/model is the
-  # admin UI ("Settings → Models", persisted in mate_model_provider /
-  # mate_model_config); AgentDashScopeChatModelBuilder resolves the key per-request
-  # from the provider row first, only falling back to this property when the row
-  # is incomplete. The placeholder default keeps DashScopeChatAutoConfiguration
-  # happy at startup when no env var is set (Docker / fresh install) — leave it
-  # alone unless you know what you're doing.
+  # Native provider fallback; persisted provider/model settings take precedence.
   ai:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:configure-in-admin-ui}
@@ -161,6 +155,10 @@ mateclaw:
   agent:
     runtime:
         dsh:
+          containment:
+            mode: ${MATECLAW_DSH_CONTAINMENT_MODE:native}
+            docker-executable: ${MATECLAW_DSH_DOCKER_EXECUTABLE:docker}
+            images-json: ${MATECLAW_DSH_DOCKER_IMAGES_JSON:}
           command: ${DSH_JSONRPC_AGENT:}
           cordis-config: ${DSH_CORDIS_CONFIG:}
           working-directory: ${DSH_CWD:}
@@ -192,7 +190,7 @@ mateclaw:
     # 生产数据库 profile（mysql/kingbase/postgres）默认覆盖为 false。
     expose-ui: ${MATECLAW_OPENAPI_EXPOSE_UI:true}
   jwt:
-    secret: ${JWT_SECRET:MateClaw-JWT-Secret-Key-2024-Please-Change-In-Production}
+    secret: ${JWT_SECRET:}
     expiration: 86400000
   sso:
     # 全局开关（默认关闭，不影响现有部署）
@@ -224,7 +222,7 @@ mateclaw:
     prefix-budget:
       # Ratio remains useful for small contexts; this hard ceiling is what keeps
       # a provider-declared 1M window from advertising ~30k schema tokens forever.
-      tool-schema-max-tokens: ${MATECLAW_TOOL_SCHEMA_MAX_TOKENS:12000}
+      tool-schema-max-tokens: ${MATECLAW_TOOL_SCHEMA_MAX_TOKENS:4000}
   workspace:
     sandbox:
       # Global fallback filesystem boundary for file/shell tools. When a
@@ -421,6 +419,18 @@ mateclaw:
 
 # MateClaw Agent 配置
 mate:
+  decision:
+    mode: SHADOW
+    scenarios: {}
+    provider: rule
+    confidence-threshold: 0.8
+    timeout-ms: 250
+    provider-threads: 4
+    shadow-threads: 2
+    queue-capacity: 64
+    retention-days: 30
+    retention-batch-size: 500
+    retention-interval-ms: 3600000
   channel:
     # 入站消息去重：IM 平台在 ack 迟到 / 丢失 / 非 200 时会重投同一条消息，
     # 不去重则每次重投都会跑一轮完整 Agent 回合，用户看到重复答复。

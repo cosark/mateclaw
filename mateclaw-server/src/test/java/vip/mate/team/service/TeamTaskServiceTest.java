@@ -9,9 +9,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
 import vip.mate.team.model.AgentTeamEntity;
+import vip.mate.decision.api.*;
 import vip.mate.team.model.TeamRunEntity;
 import vip.mate.team.model.TeamRunStatus;
 import vip.mate.team.model.TeamTaskCommentEntity;
@@ -51,6 +54,55 @@ class TeamTaskServiceTest {
     private TeamRunProjectionScheduler projectionScheduler;
     private TeamRunService runService;
     private TeamTaskService service;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"pending", "in_progress"})
+    void explicitCompletionRejectsOversizedSummaryBeforeAnyTaskMutation(String status) {
+        when(taskMapper.selectById(5L)).thenReturn(task(5L, status));
+        when(taskMapper.update(isNull(), any())).thenReturn(1);
+        var error = assertThrows(IllegalArgumentException.class,
+                () -> service.completeTask(5L, MEMBER_ID, "x".repeat(8001)));
+
+        assertTrue(error.getMessage().contains("8000"));
+        assertTrue(error.getMessage().contains("final reply"));
+        verifyNoInteractions(taskMapper, commentMapper, eventMapper, projectionScheduler);
+    }
+
+    @Test
+    void staleActiveCompletionCannotMutateOrProduceSuccessfulOutcome() {
+        var adapter = mock(WorkerDecisionAdapter.class);
+        service.setDecisionAdapter(adapter); when(adapter.enabled()).thenReturn(true);
+        var original = WorkerDecisionAdapterTest.task();
+        var snapshot = WorkerDecisionAdapter.Snapshot.capture(original);
+        var replacement = WorkerDecisionAdapterTest.task(); replacement.setDispatchCount(2);
+        when(taskMapper.selectOne(any())).thenReturn(replacement);
+        var ticket = new DecisionTicket("worker", DecisionMode.ACTIVE, new DecisionValue.BooleanValue(true));
+        assertFalse(service.completeTask(1L, null, "result", ticket, snapshot).applied());
+        verify(taskMapper, never()).update(any(), any());
+        verify(adapter).outcome(ticket, false, "STALE_ATTEMPT");
+    }
+
+    @Test
+    void failedActiveCompletionUpdateRecordsNoAppliedMutation() {
+        var adapter = mock(WorkerDecisionAdapter.class); service.setDecisionAdapter(adapter);
+        var task = WorkerDecisionAdapterTest.task();
+        when(taskMapper.selectOne(any())).thenReturn(task);
+        var ticket = new DecisionTicket("worker", DecisionMode.ACTIVE, new DecisionValue.BooleanValue(true));
+        assertFalse(service.completeTask(1L, null, "done", ticket, WorkerDecisionAdapter.Snapshot.capture(task)).applied());
+        verify(adapter).outcome(ticket, false, "TRANSITION_REJECTED");
+        verifyNoInteractions(eventMapper);
+    }
+
+    @Test
+    void explicitCompletionObservesActualApprovalStatusAfterMutation() {
+        var adapter = mock(WorkerDecisionAdapter.class);
+        service.setDecisionAdapter(adapter); when(adapter.enabled()).thenReturn(true);
+        var task = WorkerDecisionAdapterTest.task(); task.setRequireApproval(true);
+        when(taskMapper.selectById(1L)).thenReturn(task);
+        when(taskMapper.update(isNull(), any())).thenReturn(1);
+        service.completeTask(1L, null, "result");
+        verify(adapter).observeCompletion(task, TeamTaskStatus.IN_REVIEW);
+    }
 
     @BeforeAll
     static void initTableInfo() {

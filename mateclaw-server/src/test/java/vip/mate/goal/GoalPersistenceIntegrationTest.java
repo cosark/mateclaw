@@ -4,7 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import vip.mate.memory.spi.MemoryManager;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
@@ -64,12 +64,39 @@ import static org.junit.jupiter.api.Assertions.fail;
 })
 class GoalPersistenceIntegrationTest {
 
-    @MockBean private MemoryManager memory;
+    @MockitoBean private MemoryManager memory;
     @Autowired private GoalService goalService;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private GoalContinuationStore continuations;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private ApplicationEventPublisher events;
+
+    @Autowired private vip.mate.decision.config.DecisionProperties decisions;
+
+    @Test
+    void runtimeStopAndOutcomeCommitTogetherAndRollbackTogether() {
+        var previous = decisions.getMode();
+        decisions.setMode(vip.mate.decision.api.DecisionMode.ACTIVE);
+        try {
+            GoalEntity committed = goalService.create(req("runtime-stop-commit", "calculate yield"), "alice");
+            org.junit.jupiter.api.Assertions.assertTrue(goalService.suspendRuntime(committed.getId(), "PLAN_ABORTED"));
+            assertEquals(GoalStatus.PAUSED, goalService.getById(committed.getId()).getStatus());
+            assertEquals("PAUSED", jdbc.queryForObject("""
+                    SELECT o.actual_value FROM mate_decision_outcome o JOIN mate_decision_record r
+                    ON o.decision_id=r.id WHERE r.subject_id=? AND r.phase='PLAN_ABORTED'
+                    """, String.class, committed.getId()));
+            GoalEntity rolled = goalService.create(req("runtime-stop-rollback", "calculate yield"), "alice");
+            new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+                org.junit.jupiter.api.Assertions.assertTrue(goalService.suspendRuntime(rolled.getId(), "PLAN_ABORTED"));
+                tx.setRollbackOnly();
+            });
+            assertEquals(GoalStatus.ACTIVE, goalService.getById(rolled.getId()).getStatus());
+            assertEquals(0, jdbc.queryForObject("""
+                    SELECT COUNT(*) FROM mate_decision_outcome o JOIN mate_decision_record r
+                    ON o.decision_id=r.id WHERE r.subject_id=? AND r.phase='PLAN_ABORTED'
+                    """, Integer.class, rolled.getId()));
+        } finally { decisions.setMode(previous); }
+    }
 
     private GoalCreateRequest req(String convId, String title) {
         GoalCreateRequest r = new GoalCreateRequest();

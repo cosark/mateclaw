@@ -175,12 +175,12 @@ Environment overrides: `MATECLAW_WORKSPACE_SANDBOX_ENABLED` / `MATECLAW_WORKSPAC
 ```yaml
 mateclaw:
   jwt:
-    secret: ${JWT_SECRET:your-secret-key-at-least-32-characters-long}
+    secret: ${JWT_SECRET:}
     expiration: 86400000
 ```
 
 ::: warning
-Change the default JWT secret in production. Must be at least 32 characters. Use an environment variable; never commit it.
+`JWT_SECRET` is required at startup in every environment. Set a unique random value of at least 32 UTF-8 bytes; generate one with `openssl rand -base64 48`. Never commit it. Rotating it invalidates existing tokens.
 :::
 
 ### Skill workspace
@@ -225,7 +225,7 @@ Provider, key, and model rows in `Settings → Models` are primary. `DASHSCOPE_A
 |----------|----------|---------|
 | `SERPER_API_KEY` | — | Google Serper search key (search tools not yet UI-managed) |
 | `TAVILY_API_KEY` | — | Tavily search key (same as above) |
-| `JWT_SECRET` | — | JWT signing secret (recommended in production) |
+| `JWT_SECRET` | Yes | JWT signing secret |
 | `MATECLAW_CORS_ALLOWED_ORIGINS` | — | CORS allowlist (recommended in production) |
 | `DB_PASSWORD` / `DB_ADMIN_PASSWORD` | Docker | PostgreSQL application / bootstrap-admin passwords (must differ) |
 | `DB_USERNAME` / `DB_ADMIN_USERNAME` | — | PostgreSQL application / bootstrap-admin usernames |
@@ -237,14 +237,14 @@ Provider, key, and model rows in `Settings → Models` are primary. `DASHSCOPE_A
 **Linux / macOS:**
 
 ```bash
-export JWT_SECRET=your-production-secret-at-least-32-chars
+export JWT_SECRET="$(openssl rand -base64 48)"
 export SERPER_API_KEY=your-serper-key   # optional
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-$env:JWT_SECRET = "your-production-secret-at-least-32-chars"
+$env:JWT_SECRET = openssl rand -base64 48
 ```
 
 **Docker (`.env` file):**
@@ -252,7 +252,8 @@ $env:JWT_SECRET = "your-production-secret-at-least-32-chars"
 ```properties
 DB_PASSWORD=secure-password-here
 DB_ADMIN_PASSWORD=different-secure-password-here
-JWT_SECRET=your-production-secret-at-least-32-chars
+# Generate with: openssl rand -base64 48
+JWT_SECRET=replace-with-generated-value
 ```
 
 After startup, open `http://localhost:18080`, sign in as `admin / admin123`, and add your first LLM provider under `Settings → Models → Add Provider`.
@@ -267,7 +268,18 @@ MateClaw uses **Flyway** for schema migrations:
 2. `db/migration/mysql/V*__*.sql` — MySQL-dialect migration scripts
 3. After migrations, seed data is loaded from `db/data-*.sql` — idempotent
 
-Flyway auto-selects the correct dialect path based on the active Spring profile. Every startup runs a `repair` before `migrate`, self-healing checksum drift and partially-failed migrations (especially important for desktop users upgrading offline).
+Flyway selects the migration dialect from the active Spring profile. Startup runs `migrate` with checksum validation enabled by default in all bundled profiles. Applied migration files must not be edited: checksum drift or a failed migration stops startup rather than silently changing the schema history.
+
+**Desktop upgrade compatibility:** an existing desktop database whose applied scripts differ from the new release can now fail to start. A new database and an unchanged migration history need no repair. Keep a backup that can be opened with the previous application version; do not delete the database to clear a validation error.
+
+If validation fails:
+
+1. Stop the application and back up the database. Keep the exact previous and target release artifacts, and inspect the failing migration and schema history.
+2. Compare the old and new SQL with the actual schema/data. Prefer restoring the expected migration file or a maintainer-provided forward migration. `repair` changes migration metadata; it does **not** execute changed DDL, undo partial DDL/data changes, or prove the schema is correct. Resolve any partial migration effects before proceeding.
+3. Only after confirming that history repair is appropriate, set `mateclaw.flyway.auto-repair=true` (environment variable `MATECLAW_FLYWAY_AUTOREPAIR=true`) for one controlled startup. Repair uses the configured migration locations and is followed by normal migration. Keep validation enabled.
+4. Remove the opt-in immediately afterwards, restart normally, and verify validation and application behavior before allowing writes. If recovery fails, restore the backup with its matching application version.
+
+The opt-in defaults to `false`, including Desktop. It is not an unattended upgrade policy. `spring.flyway.validate-on-migrate` remains externally configurable, but setting it to `false` bypasses the validation guard and is not a repair procedure.
 
 ### Table conventions
 

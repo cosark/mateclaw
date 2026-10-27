@@ -1,7 +1,7 @@
 package vip.mate.agent.graph.plan.node;
 
-import com.alibaba.cloud.ai.graph.OverAllState;
-import com.alibaba.cloud.ai.graph.action.NodeAction;
+import vip.mate.agent.runtime.state.RunState;
+import vip.mate.agent.runtime.state.NodeAction;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.Message;
@@ -28,6 +28,8 @@ import vip.mate.goal.model.GoalCriterion;
 import vip.mate.goal.model.GoalEntity;
 import vip.mate.goal.service.GoalService;
 import vip.mate.planning.service.PlanningService;
+import vip.mate.planning.service.AgentRoutingDecisionAdapter;
+import vip.mate.decision.api.DecisionRecordingException;
 import vip.mate.team.model.AgentTeamEntity;
 import vip.mate.team.service.TeamPlanBridge;
 
@@ -68,6 +70,11 @@ public class PlanGenerationNode implements NodeAction {
     /** Optional — auto-derive a goal from the plan. Null disables the feature (legacy/test). */
     private final GoalService goalService;
     private final GoalProperties goalProperties;
+    private vip.mate.goal.service.GoalDecisionAdapter goalDecisionAdapter;
+    public void setGoalDecisionAdapter(vip.mate.goal.service.GoalDecisionAdapter adapter) {
+        this.goalDecisionAdapter = adapter;
+    }
+
     /** Optional — advertise delegatable specialist agents to the planner and
      *  resolve per-step assignments. Null disables per-step delegation (legacy/test). */
     private final AgentService agentService;
@@ -78,6 +85,10 @@ public class PlanGenerationNode implements NodeAction {
      * pipeline (non-team deployments / tests).
      */
     private TeamPlanBridge teamPlanBridge;
+    private AgentRoutingDecisionAdapter routingAdapter;
+
+    public void setRoutingAdapter(AgentRoutingDecisionAdapter adapter) { this.routingAdapter = adapter; }
+
 
     public void setTeamPlanBridge(TeamPlanBridge teamPlanBridge) {
         this.teamPlanBridge = teamPlanBridge;
@@ -296,8 +307,8 @@ public class PlanGenerationNode implements NodeAction {
      * Auto-derive a goal from a freshly-generated multi-step plan so the
      * Plan-Execute path engages the goal subsystem (the planner / step executor
      * never call {@code setGoal} themselves). The plan steps become the goal's
-     * acceptance criteria — the plan IS the decomposition — so the first
-     * evaluation skips the bootstrap round and judges those criteria directly.
+     * acceptance criteria in legacy mode. Enabled decision modes preserve the original
+     * objective so model-generated steps cannot relax the user's completion requirements.
      *
      * <p>Returns the created goal (to inject into {@code ACTIVE_GOAL} so THIS
      * run's GoalEvaluationNode picks it up) or {@code null} when not applicable:
@@ -331,10 +342,14 @@ public class PlanGenerationNode implements NodeAction {
                     : request.length() > AUTO_GOAL_TITLE_MAX
                         ? request.substring(0, AUTO_GOAL_TITLE_MAX) : request);
             req.setDescription(request);
-            List<GoalCriterion> criteria = steps.stream()
-                    .filter(s -> s != null && !s.isBlank())
-                    .map(s -> new GoalCriterion("", s.strip(), false, ""))
-                    .collect(Collectors.toList());
+            boolean preserveObjective = goalDecisionAdapter != null && goalDecisionAdapter.enabled()
+                    && !request.isBlank();
+            List<GoalCriterion> criteria = preserveObjective
+                    ? List.of(new GoalCriterion("", request, false, ""))
+                    : steps.stream().filter(s -> s != null && !s.isBlank())
+                        .map(s -> new GoalCriterion("", s.strip(), false, ""))
+                        .collect(Collectors.toList());
+            if (preserveObjective) req.setExitCriteria(request);
             if (!criteria.isEmpty()) {
                 req.setCriteria(criteria);
             }
@@ -459,7 +474,7 @@ public class PlanGenerationNode implements NodeAction {
     }
 
     @Override
-    public Map<String, Object> apply(OverAllState state) throws Exception {
+    public Map<String, Object> apply(RunState state) throws Exception {
         PlanStateAccessor accessor = new PlanStateAccessor(state);
         String goal = accessor.goal();
 
@@ -556,7 +571,9 @@ public class PlanGenerationNode implements NodeAction {
             // concatenate the agent's full systemPrompt (wiki / skill / memory guidance),
             // which would dilute the triage instructions.
             List<Message> promptMessages = new ArrayList<>();
-            promptMessages.add(new SystemMessage(PLANNING_PROMPT));
+            promptMessages.add(new SystemMessage(PLANNING_PROMPT
+                    + vip.mate.goal.service.GoalLifecycleHints.current(goalService, conversationId)
+                    + "\nA request to resume or change a goal requires tool execution, never a direct_answer claiming the transition."));
             String workspaceBasePath = state.value(MateClawStateKeys.WORKSPACE_BASE_PATH, "");
             vip.mate.agent.context.ChatOrigin chatOrigin =
                     state.<vip.mate.agent.context.ChatOrigin>value(MateClawStateKeys.CHAT_ORIGIN)
@@ -650,6 +667,14 @@ public class PlanGenerationNode implements NodeAction {
                                 + workingContext));
             }
 
+            if (goalDecisionAdapter != null && goalDecisionAdapter.enabled()) {
+                promptMessages.add(new SystemMessage("""
+                        保留用户要求的实际交付标准。缺少必要输入时，步骤仍要求原交付物，并明确报告 BLOCKED。
+                        不得自行添加“无法计算则说明原因也算完成”等替代验收条件。
+                        阻塞说明是停止信号，不是用户要求的计算结果；只有用户原本要求解释原因时才可作为交付。
+                        不要把创建目标、等待输入、计划生成当成最终交付。
+                        """));
+            }
             promptMessages.add(new UserMessage("用户目标：" + goal));
 
             // Append JSON schema hint generated by BeanOutputConverter so the LLM
@@ -670,8 +695,17 @@ public class PlanGenerationNode implements NodeAction {
             NodeStreamingChatHelper.StreamResult result = streamingHelper.streamCallSilent(
                     chatModel, prompt, conversationId, "plan_generation");
 
+            boolean payloadRecovery = result.isPayloadTooLarge();
+            if (payloadRecovery) {
+                List<Message> reduced = vip.mate.agent.graph.PayloadReduction.reduce(promptMessages);
+                if (reduced != null) {
+                    result = streamingHelper.streamCallSilent(chatModel, new Prompt(reduced), conversationId,
+                            "plan_generation_payload_retry");
+                }
+            }
+
             // Prompt-too-long handling: compact the conversation window and retry once.
-            if (result.isPromptTooLong() && conversationWindowManager != null) {
+            if (!payloadRecovery && result.isPromptTooLong() && conversationWindowManager != null) {
                 log.warn("[PlanGeneration] Prompt too long, attempting compaction and retry");
                 List<Message> compactedMessages = conversationWindowManager.compactForRetry(
                         promptMessages.subList(1, promptMessages.size()));
@@ -682,6 +716,15 @@ public class PlanGenerationNode implements NodeAction {
                     result = streamingHelper.streamCallSilent(
                             chatModel, new Prompt(retryMessages), conversationId, "plan_generation_compact_retry");
                 }
+            }
+
+            if (result.isPayloadTooLarge()) {
+                events.add(GraphEventPublisher.finishReason("incomplete"));
+                return PlanStateAccessor.output().needsPlanning(false)
+                        .directAnswer(vip.mate.agent.graph.PayloadReduction.INCOMPLETE)
+                        .put(MateClawStateKeys.FINISH_REASON, "incomplete")
+                        .currentPhase("direct_answer").contentStreamed(false)
+                        .mergeUsage(state, result).events(events).build();
             }
 
             long triageMs = System.currentTimeMillis() - triageStartMs;
@@ -807,10 +850,16 @@ public class PlanGenerationNode implements NodeAction {
             List<Long> stepAgentIds = resolveStepAgents(steps,
                     triage != null ? triage.stepAgents() : null,
                     chatOrigin.workspaceId(), agentId);
-            var plan = planningService.createPlan(agentId, conversationId, persistGoal, steps, stepAgentIds);
+            // A Team whose roster resolution failed must still bypass non-Team routing.
+            var routing = leadTeam == null && routingAdapter != null && routingAdapter.enabled()
+                    ? routingAdapter.select(chatOrigin.workspaceId(), agentId, conversationId,
+                            displayGoal(accessor.goal()), steps, stepAgentIds) : null;
+            var plan = routing == null
+                    ? planningService.createPlan(agentId, conversationId, persistGoal, steps, stepAgentIds)
+                    : planningService.createPlan(agentId, conversationId, persistGoal, steps, stepAgentIds, routing);
             log.info("[PlanGeneration] Plan created: id={}, steps={} ({}){}",
                     plan.getId(), steps.size(), steps.size() == 1 ? "single-step" : "multi-step",
-                    stepAgentIds != null ? ", per-step delegation=" + stepAgentIds : "");
+                    stepAgentIds != null ? ", planner delegation=" + stepAgentIds : "");
 
             events.add(GraphEventPublisher.planCreated(plan.getId(), steps));
 
@@ -847,6 +896,8 @@ public class PlanGenerationNode implements NodeAction {
             return planOut.build();
 
         } catch (Exception e) {
+            DecisionRecordingException recording = DecisionRecordingException.find(e);
+            if (recording != null) throw recording;
             log.error("[PlanGeneration] Triage failed, falling back to single-step plan: {}", e.getMessage(), e);
             // When the triage LLM fails or returns unparseable output we now fall back to
             // a single-step plan (the user's goal verbatim) instead of a direct text

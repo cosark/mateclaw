@@ -1,12 +1,15 @@
 package vip.mate.agent.graph.node;
 
-import com.alibaba.cloud.ai.graph.OverAllState;
+import vip.mate.agent.runtime.state.RunState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import vip.mate.agent.context.ConversationWindowManager;
+import vip.mate.config.ConversationWindowProperties;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
@@ -56,7 +59,7 @@ class ReasoningNodeOutputTest {
     }
 
     /** 构建包含前一轮残留标志的 stale state */
-    private OverAllState buildStaleState() {
+    private RunState buildStaleState() {
         Map<String, Object> map = new HashMap<>();
         map.put(CONVERSATION_ID, "test-conv");
         map.put(SYSTEM_PROMPT, "you are a helper");
@@ -69,7 +72,7 @@ class ReasoningNodeOutputTest {
         // 前一轮残留标志
         map.put(NEEDS_TOOL_CALL, true);
         map.put(SHOULD_SUMMARIZE, true);
-        return new OverAllState(map);
+        return new RunState(map);
     }
 
     // ===== 控制流标志断言辅助 =====
@@ -120,7 +123,7 @@ class ReasoningNodeOutputTest {
 
         Map<String, Object> state = baseStateMap();
         state.put(USER_MESSAGE, "帮我写个 5000 字的玄幻短篇小说，角色和剧情都你自己编。");
-        Map<String, Object> output = createNode().apply(new OverAllState(state));
+        Map<String, Object> output = createNode().apply(new RunState(state));
 
         assertEquals(false, output.get(NEEDS_TOOL_CALL));
         assertEquals(true, output.get(CONTINUE_REASONING));
@@ -137,7 +140,7 @@ class ReasoningNodeOutputTest {
 
         Map<String, Object> state = baseStateMap();
         state.put(ACTION_COMPLETION_REQUIRED, true);
-        Map<String, Object> output = createNode().apply(new OverAllState(state));
+        Map<String, Object> output = createNode().apply(new RunState(state));
 
         assertEquals(true, output.get(CONTINUE_REASONING));
         assertEquals(1, output.get(ACTION_COMPLETION_RETRY_COUNT));
@@ -156,7 +159,7 @@ class ReasoningNodeOutputTest {
         Map<String, Object> state = baseStateMap();
         state.put(ACTION_COMPLETION_REQUIRED, true);
         state.put(ACTION_COMPLETION_RETRY_COUNT, 1);
-        Map<String, Object> output = createNode().apply(new OverAllState(state));
+        Map<String, Object> output = createNode().apply(new RunState(state));
 
         assertEquals(false, output.get(CONTINUE_REASONING));
         assertEquals("action_unverified", output.get(FINISH_REASON));
@@ -175,7 +178,7 @@ class ReasoningNodeOutputTest {
         Map<String, Object> state = baseStateMap();
         state.put(USER_MESSAGE, "帮我写个 10000 字的玄幻小说，角色和剧情都你自己编。");
         state.put(MAX_ITERATIONS, 100);
-        Map<String, Object> output = createNode().apply(new OverAllState(state));
+        Map<String, Object> output = createNode().apply(new RunState(state));
 
         assertEquals(true, output.get(CONTINUE_REASONING));
         assertEquals("", output.get(FINAL_ANSWER));
@@ -202,7 +205,7 @@ class ReasoningNodeOutputTest {
         Map<String, Object> state = baseStateMap();
         state.put(USER_MESSAGE, "请输出不少于 8000 字的技术报告");
         state.put(MAX_ITERATIONS, 150);
-        Map<String, Object> output = createNode().apply(new OverAllState(state));
+        Map<String, Object> output = createNode().apply(new RunState(state));
 
         assertEquals(false, output.get(CONTINUE_REASONING));
         assertEquals("error_fallback", output.get(FINISH_REASON));
@@ -226,7 +229,7 @@ class ReasoningNodeOutputTest {
         state.put(CURRENT_ITERATION, 1);
         state.put("long_form_draft", firstChunk);
 
-        Map<String, Object> output = createNode().apply(new OverAllState(state));
+        Map<String, Object> output = createNode().apply(new RunState(state));
 
         assertEquals(false, output.get(CONTINUE_REASONING));
         assertEquals(firstChunk + finalChunk, output.get(FINAL_ANSWER));
@@ -247,7 +250,7 @@ class ReasoningNodeOutputTest {
         state.put(USER_MESSAGE, "帮我写个 10000 字的玄幻小说，角色和剧情都你自己编。");
         state.put(MAX_ITERATIONS, 1);
 
-        Map<String, Object> output = createNode().apply(new OverAllState(state));
+        Map<String, Object> output = createNode().apply(new RunState(state));
 
         assertEquals(false, output.get(CONTINUE_REASONING));
         assertEquals(partial, output.get(FINAL_ANSWER));
@@ -302,6 +305,50 @@ class ReasoningNodeOutputTest {
         assertTrue(filtered.isEmpty());
     }
 
+    @Test
+    void structuredWorkerSourceLengthDoesNotTriggerLongFormContinuation() throws Exception {
+        String answer = "{\"status\":\"COMPLETED\",\"result\":\"HEAD/TAIL/130 verified\",\"evidence\":\"team_tasks output and read_file\"}";
+        when(streamingHelper.streamCall(any(), any(), anyString(), anyString())).thenReturn(
+                new NodeStreamingChatHelper.StreamResult(answer, "", new AssistantMessage(answer),
+                        List.of(), false, 100, 100));
+        Map<String, Object> state = baseStateMap();
+        String request = "[Team task]\n源任务完整长回复（约 10731 字符）已持久化。请检索并核验，最终 JSON 小于800字符。\n"
+                + "[Final result contract]\n"
+                + vip.mate.agent.runtime.WorkerResultContract.INSTRUCTIONS
+                + "Keep the entire JSON under 8000 characters.\n";
+        state.put(USER_MESSAGE, request);
+        state.put(MAX_ITERATIONS, 30);
+        Map<String, Object> output = createNode().apply(new RunState(state));
+        assertEquals(false, output.get(CONTINUE_REASONING));
+        assertEquals(answer, output.get(FINAL_ANSWER));
+        assertTrue(ReasoningNode.requestedLongFormChars(request).isEmpty());
+    }
+
+    @Test
+    void sourceSizeAndUpperBoundsDoNotRequestLongFormProse() {
+        for (String request : List.of("源任务完整长回复（约 10731 字符）已保存。请核验并简短回复。",
+                "完整回复10975字符，与前置约10731字符一致（含封装头尾）。",
+                "完整输出约10000字，请核验首尾。", "读取一万字报告，仅回复结论。",
+                "Read the 10,000 words source report; answer briefly.",
+                "请输出不超过 10000 字的报告", "Write at most 10,000 words.",
+                "Write no more than 10000 words", "请写一篇不要超过10000字的报告")) {
+            assertTrue(ReasoningNode.requestedLongFormChars(request).isEmpty(), request);
+        }
+        assertEquals(3000, ReasoningNode.requestedLongFormChars(
+                "读取 10731 字符原文，写一篇 3000 字摘要。").orElseThrow());
+        assertEquals(10_000, ReasoningNode.requestedLongFormChars("帮我写一万字小说。").orElseThrow());
+        assertEquals(10_000, ReasoningNode.requestedLongFormChars("Write 10,000 words of fiction.").orElseThrow());
+    }
+
+    @Test
+    void explicitChineseWritingIntentsStillEnforceTheirRequestedLength() {
+        for (String request : List.of("请你写一篇10000字小说", "请把这个故事扩写到10000字",
+                "请根据工具结果写一篇10000字技术报告", "请写一篇小说，要求10000字",
+                "Write a report; length: 10000 words")) {
+            assertEquals(10_000, ReasoningNode.requestedLongFormChars(request).orElseThrow(), request);
+        }
+    }
+
     private static ToolCallback mockTool(String name) {
         ToolCallback callback = mock(ToolCallback.class);
         org.springframework.ai.tool.definition.ToolDefinition definition =
@@ -309,6 +356,62 @@ class ReasoningNodeOutputTest {
         when(definition.name()).thenReturn(name);
         when(callback.getToolDefinition()).thenReturn(definition);
         return callback;
+    }
+
+    @Test
+    void successfulNumericFactsSurviveActualAgedHistoryCompactionBeforeStreaming() throws Exception {
+        String numericResult = "{\"k\":3,\"n\":3300,\"sum\":11984445550}";
+        var result = new NodeStreamingChatHelper.StreamResult(numericResult, "", new AssistantMessage(numericResult),
+                List.of(), false, 100, 50);
+        when(streamingHelper.streamCall(any(), any(), anyString(), anyString())).thenReturn(result);
+        var history = new java.util.ArrayList<Message>();
+        for (int i = 0; i < 4; i++) {
+            String id = "call-" + i;
+            history.add(AssistantMessage.builder().content("").toolCalls(List.of(
+                    new AssistantMessage.ToolCall(id, "function", "execute_code", "{}"))).build());
+            history.add(ToolResponseMessage.builder().responses(List.of(new ToolResponseMessage.ToolResponse(
+                    id, "execute_code", i == 0 ? numericResult + "x".repeat(1000) : "latest"))).build());
+        }
+        Map<String, Object> state = baseStateMap();
+        state.put(MESSAGES, history);
+        state.put(ACTION_EXECUTION_LEDGER, ActionExecutionLedger.fromEvents(List.of(
+                GraphEventPublisher.toolComplete("call-0", "execute_code", numericResult, true))));
+        var manager = new ConversationWindowManager(new ConversationWindowProperties(), null, null);
+        var node = new ReasoningNode(chatModel, toolSet, null, streamingHelper, manager, streamTracker);
+
+        Map<String, Object> output = node.apply(new RunState(state));
+
+        var prompt = forClass(Prompt.class);
+        verify(streamingHelper).streamCall(any(), prompt.capture(), anyString(), anyString());
+        assertFalse(prompt.getValue().getInstructions().stream().filter(ToolResponseMessage.class::isInstance)
+                .map(ToolResponseMessage.class::cast).flatMap(message -> message.getResponses().stream())
+                .anyMatch(response -> response.responseData().contains("11984445550")));
+        assertTrue(prompt.getValue().getInstructions().stream().anyMatch(message ->
+                message instanceof SystemMessage && message.getText().contains("11984445550")));
+        assertEquals(result.text(), output.get(FINAL_ANSWER));
+        assertEquals(true, output.get(CONTENT_STREAMED));
+    }
+
+    @Test
+    void failedExecutionFactsAreIncludedBeforeAnswerStreaming() throws Exception {
+        var result = new NodeStreamingChatHelper.StreamResult(
+                "Finished with an earlier failed attempt.", "", new AssistantMessage("Finished with an earlier failed attempt."),
+                List.of(), false, 100, 50);
+        when(streamingHelper.streamCall(any(), any(), anyString(), anyString())).thenReturn(result);
+        Map<String, Object> state = baseStateMap();
+        state.put(ACTION_EXECUTION_LEDGER, ActionExecutionLedger.fromEvents(List.of(
+                GraphEventPublisher.toolComplete("failed-call", "tool_call", "missing language", false),
+                GraphEventPublisher.toolComplete("other-call", "tool_call", "ok", true))));
+
+        Map<String, Object> output = createNode().apply(new RunState(state));
+
+        var prompt = forClass(Prompt.class);
+        verify(streamingHelper).streamCall(any(), prompt.capture(), anyString(), anyString());
+        assertTrue(prompt.getValue().getInstructions().stream().anyMatch(message ->
+                message instanceof SystemMessage && message.getText().contains("failed-call")
+                        && message.getText().contains("does not establish recovery")));
+        assertEquals(result.text(), output.get(FINAL_ANSWER));
+        assertEquals(true, output.get(CONTENT_STREAMED));
     }
 
     @Test
@@ -323,7 +426,7 @@ class ReasoningNodeOutputTest {
         state.put(ACTION_COMPLETION_REQUIRED, true);
         state.put(ACTION_EXECUTION_LEDGER, ActionExecutionLedger.fromEvents(List.of(
                 GraphEventPublisher.toolComplete("call-1", "schedule_meeting", "HTTP 500", false))));
-        Map<String, Object> output = createNode().apply(new OverAllState(state));
+        Map<String, Object> output = createNode().apply(new RunState(state));
 
         assertEquals("action_failed", output.get(FINISH_REASON));
         assertTrue(((String) output.get(FINAL_ANSWER)).contains("执行失败"));
@@ -349,7 +452,7 @@ class ReasoningNodeOutputTest {
         stateMap.put(SOURCE_EVIDENCE_LEDGER, SourceEvidenceLedger.empty()
                 .withSourcePath("src/main/java/vip/mate/skill/controller/SkillController.java"));
 
-        Map<String, Object> output = createNode().apply(new OverAllState(stateMap));
+        Map<String, Object> output = createNode().apply(new RunState(stateMap));
 
         assertControlFlagsCleared(output, "evidenceInsufficientFinalAnswer");
         assertEquals("evidence_insufficient", output.get(FINISH_REASON));

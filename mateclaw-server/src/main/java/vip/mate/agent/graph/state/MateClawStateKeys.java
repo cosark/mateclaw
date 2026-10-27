@@ -192,7 +192,11 @@ public final class MateClawStateKeys {
     /** True when structured runtime context says this turn must perform an executable action. */
     public static final String ACTION_COMPLETION_REQUIRED = "action_completion_required";
 
-    /** Number of completion-gate continuations consumed in the current run. */
+    /** Number of prose-only final-answer corrections consumed in this run. */
+    public static final String FINALIZATION_ATTEMPTS = "finalization_attempts";
+    /** Independent executable continuation progress; all calls still spend the original run budget. */
+    public static final String FINALIZATION_PROGRESS_COUNT = "finalization_progress_count";
+    public static final String FINALIZATION_IDLE_CONTINUATIONS = "finalization_idle_continuations";
     public static final String ACTION_COMPLETION_RETRY_COUNT = "action_completion_retry_count";
 
     /** One-shot edge signal routing a rejected final candidate back to ReasoningNode. */
@@ -288,6 +292,12 @@ public final class MateClawStateKeys {
      * workspace context.
      */
     public static final String CHAT_ORIGIN = "chat_origin";
+
+    /** Thinking preference captured before asynchronous runtime callbacks. */
+    public static final String REQUESTED_THINKING_LEVEL = "requested_thinking_level";
+
+    /** Immutable delegation identity carried across runtime worker hops. */
+    public static final String SUBAGENT_RUN_CONTEXT = "subagent_run_context";
 
     // ===== Skill progressive disclosure (REPLACE strategy) =====
 

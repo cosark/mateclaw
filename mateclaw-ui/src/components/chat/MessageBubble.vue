@@ -73,7 +73,7 @@
               <template v-else>
                 <template v-for="seg in iter.items" :key="seg.id">
                 <ThinkingSegment v-if="seg.type === 'thinking' && showThinking" :segment="seg" />
-                <ToolCallSegment v-else-if="seg.type === 'tool_call'" :segment="seg" />
+                <ToolCallSegment v-else-if="seg.type === 'tool_call'" :segment="seg" :show-structured-result="false" />
                 <template v-else-if="seg.type === 'content'">
                   <div v-if="seg.repetitionWarning" class="repetition-warning">
                     <el-icon><WarningFilled /></el-icon>
@@ -221,6 +221,14 @@
         </div>
 
         </template><!-- /传统合并渲染模式 -->
+
+        <!-- Tool payloads remain in metadata; only their presentation moves.
+             Wait for this turn to finish, including stop/error, so results do
+             not interrupt reasoning and do not disappear on interrupted turns. -->
+        <div v-if="!isGenerating && answerToolResults.length" class="answer-tool-results">
+          <ToolResultView v-for="result in answerToolResults" :key="result.toolCallId || result.id"
+            :structured-content="result.structuredContent" />
+        </div>
 
         <!-- Stopped/interrupted status lives outside the rendering fork so
              segmented history turns with only thinking/tool output still make
@@ -587,13 +595,15 @@ import { buildGeneratedFileNameMap, linkifyGeneratedFileUrls } from '@/utils/gen
 import { ensureModelViewer } from '@/utils/lazyModelViewer'
 import { useAuthenticatedAttachment } from '@/composables/useAuthenticatedAttachment'
 import { useToolLabel } from '@/composables/useToolLabel'
-import { http } from '@/api'
+import { http, fetchAuthenticatedBlob } from '@/api'
 import { copyToClipboard } from '@/utils/clipboard'
 import TypingCursor from './TypingCursor.vue'
 import { previewKindOf } from './preview/previewKind'
 import { openFilePreview } from './preview/previewBus'
 import BrowserTimeline from './BrowserTimeline.vue'
 import ToolCallSegment from './ToolCallSegment.vue'
+import ToolResultView from './tool-results/ToolResultView.vue'
+import { hasToolResultUi } from './tool-results/registry'
 import ThinkingSegment from './ThinkingSegment.vue'
 import ContentSegment from './ContentSegment.vue'
 import GoalAvatarRing from '@/components/goal/GoalAvatarRing.vue'
@@ -853,59 +863,59 @@ function copyMessage() {
 // --- TTS 朗读 ---
 const ttsState = ref<'idle' | 'loading' | 'playing'>('idle')
 let ttsAudio: HTMLAudioElement | null = null
+let ttsBlobUrl: string | null = null
+let ttsRequestVersion = 0
+
+function stopTts() {
+  ttsAudio?.pause()
+  if (ttsAudio) { ttsAudio.onended = null; ttsAudio.onerror = null }
+  ttsAudio = null
+  if (ttsBlobUrl) URL.revokeObjectURL(ttsBlobUrl)
+  ttsBlobUrl = null
+  ttsState.value = 'idle'
+}
 
 async function handleTts() {
   if (ttsState.value === 'playing') {
-    // 停止播放
-    ttsAudio?.pause()
-    ttsAudio = null
-    ttsState.value = 'idle'
+    stopTts()
     return
   }
-
+  if (ttsState.value === 'loading') return
   const text = displayContent.value || props.message.content || ''
-  if (!text) return
-
   const conversationId = props.message.conversationId
-  if (!conversationId) return
+  if (!text || !conversationId) return
 
+  const version = ++ttsRequestVersion
   ttsState.value = 'loading'
   try {
-    const res: any = await http.post('/tts/synthesize', {
-      conversationId,
-      text,
-    })
-    if (res.data?.success && res.data?.audioUrl) {
-      // 通过认证 fetch 获取音频 blob
-      const audioRes = await fetch(res.data.audioUrl, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-      })
-      const blob = await audioRes.blob()
-      const blobUrl = URL.createObjectURL(blob)
-      ttsAudio = new Audio(blobUrl)
-      ttsAudio.onended = () => {
-        ttsState.value = 'idle'
-        URL.revokeObjectURL(blobUrl)
-        ttsAudio = null
-      }
-      ttsAudio.onerror = () => {
-        ttsState.value = 'idle'
-        URL.revokeObjectURL(blobUrl)
-        ttsAudio = null
-      }
-      ttsState.value = 'playing'
-      await ttsAudio.play()
-    } else {
-      ttsState.value = 'idle'
+    // The shared interceptor already unwraps the raw TTS response body.
+    const result: any = await http.post('/tts/synthesize', { conversationId, text }, { timeout: 240_000 })
+    if (version !== ttsRequestVersion) return
+    if (!result?.success || !result.audioUrl) {
+      throw new Error(result?.error || t('chat.ttsFailed'))
     }
-  } catch {
-    ttsState.value = 'idle'
+    const blob = await fetchAuthenticatedBlob(result.audioUrl)
+    if (version !== ttsRequestVersion) return
+    ttsBlobUrl = URL.createObjectURL(blob)
+    ttsAudio = new Audio(ttsBlobUrl)
+    ttsAudio.onended = stopTts
+    ttsAudio.onerror = () => {
+      stopTts()
+      mcToast.error(t('chat.ttsFailed'))
+    }
+    await ttsAudio.play()
+    if (version === ttsRequestVersion && ttsAudio) ttsState.value = 'playing'
+  } catch (error) {
+    if (version !== ttsRequestVersion) return
+    stopTts()
+    mcToast.error(error instanceof Error ? error.message : t('chat.ttsFailed'))
   }
 }
 
 onBeforeUnmount(() => {
   if (copyTimer) clearTimeout(copyTimer)
-  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null }
+  ++ttsRequestVersion
+  stopTts()
   revokeAll()
 })
 
@@ -1195,9 +1205,12 @@ const segments = computed<MessageSegment[]>(() => {
   const toolCalls = meta?.toolCalls || []
   toolCalls.forEach((tc: ToolCallMeta, i: number) => {
     segs.push({
-      id: `tc-${i}`, type: 'tool_call', status: 'completed',
+      id: `tc-${i}`, type: 'tool_call',
+      status: tc.success === false ? 'error'
+        : (!tc.status || tc.status === 'completed' ? 'completed' : 'running'),
       toolName: tc.name, toolArgs: tc.arguments,
       toolResult: tc.result, toolSuccess: tc.success,
+      toolCallId: tc.toolCallId, structuredContent: tc.structuredContent,
     })
   })
   if (props.message.content) {
@@ -1206,9 +1219,24 @@ const segments = computed<MessageSegment[]>(() => {
   return segs
 })
 
+// Use the same deduplicated source for live and reloaded messages. Never
+// concatenate toolCalls with segments: they are two copies of the same calls.
+const answerToolResults = computed(() => {
+  const seen = new Set<string>()
+  return segments.value.filter(seg => {
+    if (seg.type !== 'tool_call' || seg.status !== 'completed'
+        || seg.toolSuccess === false || !hasToolResultUi(seg.structuredContent)) return false
+    const key = seg.toolCallId || seg.id
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
+
 /**
  * Use segmented rendering when there are multiple segments, OR when the turn
- * contains a delegation segment. Delegations live in `segments` but not in
+ * contains structured output or a delegation segment. Structured output must
+ * remain visible even when it is the only segment. Delegations live in `segments` but not in
  * `metadata.toolCalls`, so the fallback path (which only reads toolCalls)
  * renders nothing for them — a single-step plan that delegates to a subagent
  * would otherwise show the subagent call as completely invisible. Forcing
@@ -1216,7 +1244,7 @@ const segments = computed<MessageSegment[]>(() => {
  */
 const useSegmentedView = computed(() =>
   segments.value.length > 1 ||
-  segments.value.some(s => s.type === 'tool_call' && (s.toolName || '').startsWith('→'))
+  segments.value.some(s => s.type === 'tool_call' && (s.structuredContent || (s.toolName || '').startsWith('→')))
 )
 
 /**

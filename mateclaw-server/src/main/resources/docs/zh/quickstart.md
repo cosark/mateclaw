@@ -1,5 +1,8 @@
 # 快速开始
 
+3.0.0 正式版发布日期为 **2026-10-26**；源码与发行包版本统一为 `3.0.0`，发行包请从 [GitHub Releases](https://github.com/mateaix/mateclaw/releases) 下载。升级前请阅读[升级说明](./changelog#升级与验证)。
+
+
 60 秒到第一条消息。**只有一条路：桌面端。**
 
 Docker 和源码启动在 [配置说明](./config) 和 [贡献指南](./contributing) 里。这一页只做一件事——用尽可能快的速度，把你从"什么都没有"送到"一个能工作的 Agent"面前。
@@ -78,7 +81,7 @@ Docker 和源码启动在 [配置说明](./config) 和 [贡献指南](./contribu
 ## 其他部署方式
 
 - **Docker**——`cp .env.example .env` 填好密码，`docker compose up -d --build`。完整的前置要求、Maven 镜像选择（中国 / 美国）、浏览器工具自检、升级流程看 [Docker 部署](./docker-deploy)。
-- **从源码跑**——`mateclaw-server/` 里 `mvn spring-boot:run`，`mateclaw-ui/` 里 `npm run dev`。细节在 [贡献指南](./contributing)。
+- **从源码跑**——从仓库根目录启动后端，明确指定根目录 `data/` 下的数据库与工作空间路径；前端在 `mateclaw-ui/` 运行 `npm run dev -- --host 127.0.0.1`。细节在 [贡献指南](./contributing)。
 - **桌面端内部**——打包、签名、自动更新。看 [桌面应用](./desktop)。
 
 ---

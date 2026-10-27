@@ -1,5 +1,8 @@
 # Quick Start
 
+Release date: **2026-10-26**. These notes cover the 3.0.0 stable release. Source and package versions are `3.0.0`; download published packages from [GitHub Releases](https://github.com/mateaix/mateclaw/releases). Read the [upgrade guidance](./changelog#upgrade-and-validation) before migrating.
+
+
 Sixty seconds to first message. **One path. Desktop app.**
 
 If you want Docker or local development instead, those live in [Configuration](./config) and [Contributing](./contributing). This page does one thing only — get you from zero to a working agent as fast as humanly possible.
@@ -78,7 +81,7 @@ First run should Just Work. If it didn't:
 ## Other ways to run MateClaw
 
 - **Docker** — `cp .env.example .env`, set the passwords, then `docker compose up -d --build`. Full prerequisites, Maven mirror selection (China vs US), browser-tool self-check, and upgrade flow live in [Docker Deployment](./docker-deploy).
-- **From source** — `mvn spring-boot:run` in `mateclaw-server/` and `npm run dev` in `mateclaw-ui/`. See [Contributing](./contributing).
+- **From source** — start the backend from the repository root with explicit root `data/` database/workspace paths, and run `npm run dev -- --host 127.0.0.1` in `mateclaw-ui/`. See [Contributing](./contributing).
 - **Desktop internals** — packaging, code signing, auto-update. See [Desktop App](./desktop).
 
 ---

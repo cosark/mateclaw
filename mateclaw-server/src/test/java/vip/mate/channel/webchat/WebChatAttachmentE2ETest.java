@@ -3,12 +3,15 @@ package vip.mate.channel.webchat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import reactor.core.publisher.Flux;
 import vip.mate.MateClawApplication;
 import vip.mate.agent.AgentService;
@@ -24,11 +27,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.Comparator;
 import java.util.Map;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -66,28 +66,30 @@ import static org.mockito.ArgumentMatchers.isNull;
 @TestPropertySource(properties = {
         "spring.datasource.url=jdbc:h2:mem:webchat_att_e2e_${random.uuid};MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1",
         "spring.ai.dashscope.api-key=test-key",
-        "mateclaw.jwt.secret=webchat-it-secret-0123456789",
+        "mateclaw.jwt.secret=webchat-it-secret-0123456789abcdef",
         "mateclaw.feature-flag.refresh-ms=999999"
 })
 class WebChatAttachmentE2ETest {
 
-    private static final String SECRET = "webchat-it-secret-0123456789";
+    private static final String SECRET = "webchat-it-secret-0123456789abcdef";
     private static final String API_KEY = "testkey1atte2e01"; // key8 = "testkey1"
     private static final long CHANNEL_ID = 9_148_101L;
     private static final long AGENT_ID = 9_148_1011L;
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(15);
 
-    /**
-     * Wipe the upload dir for our test conversation ids. The path is deterministic
-     * from the API key prefix, so we can clean it precisely instead of nuking
-     * the whole {@code data/chat-uploads} tree.
-     */
-    private static final Path UPLOAD_ROOT = Paths.get("data", "chat-uploads");
+    /** Each test-class run owns its upload tree; JUnit removes it after the class. */
+    @TempDir
+    static Path uploadRoot;
+
+    @DynamicPropertySource
+    static void uploadProperties(DynamicPropertyRegistry registry) {
+        registry.add("mateclaw.chat.upload.base-dir", () -> uploadRoot.toString());
+    }
 
     @LocalServerPort private int port;
     @Autowired private JdbcTemplate jdbc;
 
-    @MockBean private AgentService agentService;
+    @MockitoBean private AgentService agentService;
 
     private HttpClient http;
 
@@ -245,21 +247,6 @@ class WebChatAttachmentE2ETest {
         return end < 0 ? null : json.substring(start, end);
     }
 
-    // ==================== cleanup ====================
-
-    @org.junit.jupiter.api.AfterEach
-    void cleanUploadDirs() throws IOException {
-        // Only the convs under our key8 prefix are ours; safe to wipe.
-        Path root = UPLOAD_ROOT.resolve("webchat:testkey1");
-        if (Files.exists(root)) {
-            try (Stream<Path> walk = Files.walk(root)) {
-                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.deleteIfExists(p); } catch (IOException ignored) { }
-                });
-            }
-        }
-    }
-
     // ==================== tests ====================
 
     @Test
@@ -288,6 +275,7 @@ class WebChatAttachmentE2ETest {
         // on Windows), so assert against the sanitized segment.
         String path = extractStringField(parts, "path");
         assertThat(path).contains(ChatUploadLocationResolver.sanitizeSegment(cid));
+        assertThat(Path.of(path).toAbsolutePath().normalize()).startsWith(uploadRoot.toAbsolutePath().normalize());
         assertThat(Files.isRegularFile(Path.of(path))).isTrue();
         // The bytes on disk match what we uploaded.
         assertThat(Files.readString(Path.of(path))).isEqualTo(fileBody);

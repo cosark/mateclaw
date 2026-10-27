@@ -1,15 +1,22 @@
 ---
 title: MateClaw 项目介绍 — 自部署多智能体 AI 操作系统
-description: MateClaw 是基于 Spring AI Alibaba 的开源多智能体 AI 操作系统。ReAct + Plan-and-Execute 双引擎、LLM Wiki 知识库、四层记忆系统、MCP 工具协议、8 渠道统一接入。一个 JAR 包自部署，数据与外发集成边界由你掌控。
+description: MateClaw 是基于 Spring AI + AgentScope 的开源多智能体 AI 操作系统。ReAct + Plan-and-Execute 双引擎、LLM Wiki 知识库、四层记忆系统、MCP 工具协议、8 渠道统一接入。一个 JAR 包自部署，数据与外发集成边界由你掌控。
 head:
   - - meta
     - name: keywords
-      content: MateClaw,多智能体,AI操作系统,自部署AI,Spring AI Alibaba,ReAct,Plan-and-Execute,MCP,LLM Wiki,记忆系统,Tool Guard,开源
+      content: MateClaw,多智能体,AI操作系统,自部署AI,Spring AI + AgentScope,ReAct,Plan-and-Execute,MCP,LLM Wiki,记忆系统,Tool Guard,开源
 ---
+
+3.0.0 升级到 Java 21、Spring Boot 4 和 Spring AI 2，AgentScope 2 驱动 ReAct 与计划单步执行循环。工具审批、权限、Goal、SSE 与持久化继续由 MateClaw 统一治理。
+
+发布日期：**2026-10-26**。本文为 3.0.0 正式版更新说明。源码与发行包版本统一为 `3.0.0`；发行包请从 [GitHub Releases](https://github.com/mateaix/mateclaw/releases) 下载。
+
+[升级说明与 changelog](./changelog)
+
 
 # MateClaw — 自部署多智能体 AI 操作系统
 
-**v2.3.0（2026-09-20 发布）——持久目标的 JSON 验收与执行证据。** 用户可配置 JSON 必需字段，将检查结果绑定到当前要求和不可变产物版本；同时加入团队成员受控干预、技能文档及文件夹上传，并修复 DSH 历史与输出预算、vLLM 推理内容和 SSE 分帧。 [v2.3.0](./releases/2.3.0)
+**上一正式版 v2.3.0（2026-09-20 发布）——持久目标的 JSON 验收与执行证据。** 用户可配置 JSON 必需字段，将检查结果绑定到当前要求和不可变产物版本；同时加入团队成员受控干预、技能文档及文件夹上传，并修复 DSH 历史与输出预算、vLLM 推理内容和 SSE 分帧。 [v2.3.0](./releases/2.3.0)
 
 **你的多智能体 AI，跑在你自己的机器上，按你自己的规则。**
 
@@ -69,7 +76,7 @@ MateClaw 换了一个打法：**所有东西放在一个屋檐下，跑在你自
 
 ## 底下是什么
 
-- **后端**——Spring Boot 3.5 + Spring AI Alibaba 1.1。Agent 运行时是一张 StateGraph，reasoning、action、observation、plan generation、step execution 都是图上的节点。MyBatis Plus 持久化。流式走 SSE（WebFlux 被明确拒之门外）。
+- **后端**——Java 21、Spring Boot 4.1.1、Spring AI 2.0.1 与 AgentScope Java 2.0.4。原生 ReAct 管理推理/行动循环，显式应用阶段管理 Plan-and-Execute。MyBatis Plus 持久化产品数据，流式输出使用 servlet MVC SSE。
 - **前端**——Vue 3 + TypeScript。Pinia 管状态，Element Plus + Tailwind 做 UI，支持深色模式。前端 build 的产物直接进后端 JAR 的 `static/`，一个进程服务两端。
 - **桌面端**——Electron 包 JRE 21 + 后端 JAR。双击启动，用户完全不需要知道底下跑的是 Java。
 - **渠道**——每个渠道是一个 `ChannelAdapter` SPI 实现。Web 走 SSE，IM 各自走平台的长连接或 webhook。

@@ -10,6 +10,10 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.converter.BeanOutputConverter;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.cfg.EnumFeature;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.ai.evaluation.EvaluationRequest;
 import org.springframework.ai.evaluation.EvaluationResponse;
 import org.springframework.ai.evaluation.Evaluator;
@@ -64,10 +68,17 @@ public class GoalEvaluationService implements Evaluator {
 
     /**
      * Token budget for the evaluator response. Reasoning-mode models consume
-     * a chunk of this on internal thinking before emitting JSON; 2000 leaves
-     * comfort for the reasoning trace plus the small object we need.
+     * internal thinking before emitting JSON. Keep the old limit in OFF/managed
+     * flows; ordinary enabled goals need bounded headroom after observed LENGTH exits.
      */
     private static final int MAX_OUTPUT_TOKENS = 2000;
+    private static final int ENABLED_OUTPUT_TOKENS = 4096;
+    private vip.mate.decision.config.DecisionProperties decisionProperties;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setDecisionProperties(vip.mate.decision.config.DecisionProperties properties) {
+        this.decisionProperties = properties;
+    }
+
     private static final int MAX_CONVERSATION_CHARS = 6_000;
     private static final int MAX_TERMINAL_ANSWER_CHARS = 4_000;
     private static final int MAX_SUCCESS_CHECK_CHARS = 4_000;
@@ -94,10 +105,14 @@ public class GoalEvaluationService implements Evaluator {
         this.objectMapper = objectMapper;
         // Preserve converter tolerance for extra fields, but never silently
         // choose the last value of an ambiguous model-produced JSON key.
-        ObjectMapper evaluatorJson = objectMapper.copy()
-                .disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+        // The AI2 converter owns a Jackson3 boundary; stored application data remains Jackson2.
+        JsonMapper evaluatorJson = JsonMapper.builder()
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+                .enable(EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
+                .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                .build();
         this.draftConverter = new BeanOutputConverter<>(GoalCriteriaDraft.class, evaluatorJson);
         this.verdictConverter = new BeanOutputConverter<>(GoalChecklistVerdict.class, evaluatorJson);
     }
@@ -146,7 +161,10 @@ public class GoalEvaluationService implements Evaluator {
 
             ChatOptions options = ChatOptions.builder()
                     .temperature(0.1)
-                    .maxTokens(MAX_OUTPUT_TOKENS)
+                    .maxTokens(decisionProperties != null && !goal.isJsonAcceptanceRequired()
+                            && decisionProperties.modeFor(vip.mate.decision.api.DecisionType.GOAL_CONTINUATION)
+                                != vip.mate.decision.api.DecisionMode.OFF
+                            ? ENABLED_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS)
                     .build();
 
             ChatResponse response = chatModel.call(new Prompt(messages, options));
@@ -154,7 +172,11 @@ public class GoalEvaluationService implements Evaluator {
 
             String body = extractText(response);
             if (body == null || body.isBlank()) {
-                log.warn("[GoalEvaluation] empty response from evaluator model={}", model.getModelName());
+                log.warn("[GoalEvaluation] empty response: model={}, finishReason={}, totalTokens={}, elapsedMs={}",
+                        model.getModelName(),
+                        response == null || response.getResult() == null ? null : response.getResult().getMetadata().getFinishReason(),
+                        response == null || response.getMetadata() == null || response.getMetadata().getUsage() == null
+                                ? null : response.getMetadata().getUsage().getTotalTokens(), elapsed);
                 // The call was really spent — bill it.
                 return GoalEvaluationResult.fallbackAfterCall("empty_response", model.getModelName(), elapsed)
                         .withEvaluationRevision(evaluationRevision);
